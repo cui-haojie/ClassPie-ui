@@ -1,0 +1,28 @@
+@font-face {
+  font-family: "iconfont"; /* Project id  */
+  src: url('iconfont01.ttf?t=1753320712141') format('truetype');
+}
+
+.iconfont {
+  font-family: "iconfont" !important;
+  font-style: normal;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.icon-gantanhao:before {
+  content: "\e624";
+}
+
+.icon-chacha_chacha:before {
+  content: "\e6bd";
+}
+
+.icon-erweima:before {
+  content: "\e653";
+}
+
+.icon-sandian:before {
+  content: "\e506";
+}
+
