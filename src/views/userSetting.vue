@@ -18,6 +18,7 @@ const status = ref('')
 const mechanism = ref('')
 const email_or_phone = ref('')
 const status_number = ref('')
+const schoolClassName = ref('')
 
 function update() {
   if (!account.value) {
@@ -41,6 +42,15 @@ function update() {
       .catch(error => {
         console.error(error)
         alert(error.message || "请求失败")
+      })
+
+  request.post("/editor/studentSchoolClass", {account: account.value})
+      .then(res => {
+        const list = Array.isArray(res) ? res : (res?.name ? [res] : [])
+        schoolClassName.value = list.map(item => item.name).filter(Boolean).join('、')
+      })
+      .catch(() => {
+        schoolClassName.value = ''
       })
 }
 
@@ -81,7 +91,7 @@ function editStatusNumber() {
 }
 
 function editPhone() {
-  saveField('email_or_phone', '手机号', email_or_phone.value)
+  saveField('email_or_phone', '手机号', email_or_phone.value === 'yes' ? '' : email_or_phone.value)
 }
 
 function editStatus() {
@@ -131,6 +141,10 @@ function maskPhone(phone) {
   return phone.slice(0, 3) + '****' + phone.slice(-4)
 }
 
+function bindHint(feature) {
+  alert(`${feature}功能暂未开放`)
+}
+
 update()
 </script>
 
@@ -163,9 +177,9 @@ update()
       </div>
 
       <div class="account" v-show="activeName === 'first'">
-        <h2 class="set_name" style="padding: 24px 0">账号设置</h2>
+        <h2 class="set_name">账号设置</h2>
         <ul class="accountReal">
-          <li style="border-top-right-radius: 5px">
+          <li class="row-first">
             <label>账号</label><span class="content">{{ account_1 }}</span>
           </li>
           <li>
@@ -176,15 +190,18 @@ update()
             <label>手机号</label><span class="content">{{ maskPhone(email_or_phone) }}</span>
             <p class="right"><span @click="editPhone">更换手机号</span></p>
           </li>
-          <li style="border-bottom-right-radius: 5px">
+          <li class="row-last">
             <label>密码</label><span class="content">{{ password }}</span>
             <p class="right"><span @click="changePassword">修改密码</span></p>
           </li>
         </ul>
-        <h2 class="set_name" style="padding: 24px 0">基础信息</h2>
+
+        <h2 class="set_name">基础信息</h2>
         <ul class="accountReal">
-          <li style="border-top-right-radius: 5px">
-            <label>姓名</label><span class="content">{{ name || '未完善' }}</span>
+          <li class="row-first">
+            <label>姓名</label>
+            <span class="content" v-if="name">{{ name }}</span>
+            <span class="hint" v-else>未完善</span>
             <p class="right"><span @click="editName">编辑</span></p>
           </li>
           <li>
@@ -193,17 +210,46 @@ update()
             <span class="hint" v-else>未完善</span>
             <p class="right"><span @click="editStatusNumber">编辑</span></p>
           </li>
-          <li style="border-bottom-right-radius: 5px">
+          <li>
             <label>学校</label>
             <span class="content" v-if="mechanism">{{ mechanism }}</span>
             <span class="hint" v-else>未完善</span>
             <p class="right"><span @click="editMechanism">编辑</span></p>
           </li>
+          <li>
+            <label>院系</label><span class="hint">未完善</span>
+          </li>
+          <li>
+            <label>专业</label><span class="hint">未完善</span>
+          </li>
+          <li>
+            <label>班级</label>
+            <span class="content" v-if="schoolClassName">{{ schoolClassName }}</span>
+            <span class="hint" v-else>未完善</span>
+          </li>
+          <li>
+            <label>年级</label><span class="hint">未完善</span>
+          </li>
+          <li class="row-last">
+            <label>入学时间</label><span class="hint">未完善</span>
+          </li>
+        </ul>
+
+        <h2 class="set_name">第三方账号绑定</h2>
+        <ul class="accountReal">
+          <li class="row-first">
+            <label>邮箱绑定</label><span class="hint">未完善</span>
+            <p class="right"><span @click="bindHint('邮箱绑定')">立即绑定</span></p>
+          </li>
+          <li class="row-last">
+            <label>微信绑定</label><span class="hint">未完善</span>
+            <p class="right"><span @click="bindHint('微信绑定')">立即绑定</span></p>
+          </li>
         </ul>
       </div>
 
       <div class="account" v-show="activeName === 'second'">
-        <p class="hint" style="padding: 24px 0">通知设置功能暂未开放</p>
+        <p class="hint notify-hint">通知设置功能暂未开放</p>
       </div>
     </div>
   </div>
@@ -234,7 +280,7 @@ update()
   display: flex;
   align-items: center;
   margin-bottom: 20px;
-  margin-top: 100px;
+  margin-top: 20px;
 }
 
 .us-avatar {
@@ -309,17 +355,21 @@ update()
 .set_name {
   font-weight: 400;
   font-size: 21px;
+  padding: 24px 0 12px;
+  margin: 0;
 }
 
 ul {
   border-radius: 5px;
   border-left: 5px solid rgb(66, 133, 244);
+  margin: 0 0 8px;
+  padding: 0;
 }
 
 li {
   list-style-type: none;
   padding: 16px 0;
-  height: 68px;
+  min-height: 68px;
   line-height: 34px;
   background-color: #FFFFFF;
   border: 1px solid rgb(218, 220, 224);
@@ -327,6 +377,15 @@ li {
   border-left: none !important;
   display: flex;
   position: relative;
+  align-items: center;
+}
+
+.row-first {
+  border-top-right-radius: 5px;
+}
+
+.row-last {
+  border-bottom-right-radius: 5px;
 }
 
 label {
@@ -334,6 +393,7 @@ label {
   color: #000000;
   font-size: 18px;
   width: 195px;
+  flex-shrink: 0;
 }
 
 .right {
@@ -350,5 +410,9 @@ label {
 
 .hint {
   color: rgb(95, 99, 148);
+}
+
+.notify-hint {
+  padding: 24px 0;
 }
 </style>

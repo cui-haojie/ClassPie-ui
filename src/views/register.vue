@@ -2,10 +2,25 @@
 
 import {RouterView, useRoute, useRouter} from "vue-router";
 import request from "@/utils/request.js";
+import {onMounted, ref} from "vue";
 
 const route = useRoute();
 const router = useRouter();
 let status = "老师";
+const schoolClasses = ref([]);
+const selectedClassIds = ref([]);
+
+function loadSchoolClasses() {
+  request.post('/editor/listSchoolClasses', {})
+      .then(res => {
+        schoolClasses.value = res || [];
+      })
+      .catch(err => console.error(err));
+}
+
+onMounted(() => {
+  loadSchoolClasses();
+});
 
 function changeTeacher() {
   teacher.style.border = "1px solid rgb(72, 138, 248)"
@@ -19,10 +34,11 @@ function changeStudent() {
   teacher.style.border = "transparent";
   studentId.style.display = "block";
   status = "学生";
+  loadSchoolClasses();
 }
 
 function create() {
-  const account = {
+  const payload = {
     account: document.getElementById('input_account').value.trim(),
     password: document.getElementById('input_password').value.trim(),
     name: document.getElementById('input_name').value.trim(),
@@ -31,9 +47,17 @@ function create() {
     status_number: document.getElementById('input_status_number').value.trim(),
   }
 
-  if (!validateAccount(account)) return;
+  if (!validateAccount(payload)) return;
 
-  request.post('/editor/add', account).then(response => {
+  if (status === '学生') {
+    if (selectedClassIds.value.length === 0) {
+      alert("请至少选择一个行政班级");
+      return;
+    }
+    payload.school_class_ids = selectedClassIds.value.map(Number);
+  }
+
+  request.post('/editor/add', payload).then(response => {
     if (response === true) {
       alert("创建成功")
       console.log(response + "创建成功")
@@ -99,6 +123,14 @@ function validateAccount(account) {
 
       <div id="studentId">
         <input type="text" placeholder="请输入学号" class="input" id="input_status_number"><br>
+        <div class="class-picker">
+          <p class="class-picker-title">行政班级（可多选）</p>
+          <label v-for="sc in schoolClasses" :key="sc.id" class="class-option">
+            <input type="checkbox" :value="sc.id" v-model="selectedClassIds">
+            {{ sc.name }}{{ sc.mechanism ? ' · ' + sc.mechanism : '' }}
+          </label>
+          <p v-if="schoolClasses.length === 0" class="class-picker-empty">暂无班级，请联系老师先创建</p>
+        </div>
       </div>
       <br>
       <div class="captcha-row">
@@ -233,6 +265,46 @@ input:focus {
 #studentId {
   margin-top: 20px;
   display: none;
+}
+
+.class-select {
+  margin-top: 12px;
+}
+
+.class-picker {
+  margin-top: 12px;
+  padding: 12px 15px;
+  border: 1px solid rgb(218, 220, 224);
+  border-radius: 7px;
+  background: #fff;
+  max-width: 490px;
+}
+
+.class-picker-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  color: #666;
+}
+
+.class-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 16px;
+  color: rgb(95, 99, 148);
+  cursor: pointer;
+}
+
+.class-option input {
+  width: 16px;
+  height: 16px;
+}
+
+.class-picker-empty {
+  margin: 0;
+  color: #999;
+  font-size: 14px;
 }
 
 button.register {

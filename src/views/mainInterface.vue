@@ -28,6 +28,10 @@ const courseListVisible = ref(true)
 const activeTab = ref('all')
 const showArchiveModal = ref(false)
 const archivedCourses = ref([])
+const schoolClasses = ref([])
+const selectedSchoolClassIds = ref([])
+const newClassName = ref('')
+const newClassMechanism = ref('')
 
 const pinnedCourses = computed(() =>
     courses.value.filter(course => course.is_pinned)
@@ -162,11 +166,44 @@ function joinClass() {
   document.addEventListener('touchmove', preventTouch, { passive: false });
 }
 
+function loadSchoolClasses() {
+  request.post("/editor/listSchoolClasses", {})
+      .then(res => {
+        schoolClasses.value = res || [];
+      })
+      .catch(err => console.error(err));
+}
+
 function createClass() {
+  loadSchoolClasses();
   around.style.display = 'block';
   create_class.style.display = 'block';
   document.body.style.overflow = 'hidden';
   document.addEventListener('touchmove', preventTouch, { passive: false });
+}
+
+function addSchoolClass() {
+  if (!newClassName.value.trim()) {
+    alert("请输入班级名称");
+    return;
+  }
+  request.post("/editor/createSchoolClass", {
+    name: newClassName.value.trim(),
+    mechanism: newClassMechanism.value.trim() || mechanism.value,
+    teacher_account: account.value
+  }).then(res => {
+    if (res && res.id) {
+      schoolClasses.value = [res, ...schoolClasses.value];
+      if (!selectedSchoolClassIds.value.includes(res.id)) {
+        selectedSchoolClassIds.value = [...selectedSchoolClassIds.value, res.id];
+      }
+      newClassName.value = '';
+      newClassMechanism.value = '';
+      alert("班级创建成功");
+    } else {
+      alert("班级创建失败");
+    }
+  }).catch(err => alert("班级创建失败: " + err.message));
 }
 
 function kill2() {
@@ -175,6 +212,7 @@ function kill2() {
   name_input.value = '';
   time_input.value = '';
   classes_input.value = '';
+  selectedSchoolClassIds.value = [];
 }
 
 function cancel2() {
@@ -183,6 +221,7 @@ function cancel2() {
   name_input.value = '';
   time_input.value = '';
   classes_input.value = '';
+  selectedSchoolClassIds.value = [];
 }
 
 function confirmClass() {
@@ -208,14 +247,17 @@ function CreateClass() {
     teacher_account: account.value,
     class_time: time_input.value,
     class_name: name_input.value,
-    selected_classes: classes_input.value
+    selected_classes: classes_input.value,
+    school_class_ids: selectedSchoolClassIds.value.map(Number)
   }
   request.post("/editor/createCourse", CourseRequest)
       .then((res) => {
-        if (res) {
-          alert("创建课程成功")
+        if (res && res.id) {
+          alert("创建课程成功，加课码：" + (res.code || ''))
           loadCourse();
           cancel2();
+        } else {
+          alert("创建失败")
         }
       }).catch(error => {
     console.log(error);
@@ -345,7 +387,30 @@ function restoreCourse(courseId) {
         <input id="time_input" type="text" class="modal-input modal-input-wide">
       </div>
       <div>
-        教学班级:
+        行政班级（可多选，不选则仅手动加课）:
+        <div class="school-class-picker">
+          <label
+              v-for="sc in schoolClasses"
+              :key="sc.id"
+              class="class-option"
+          >
+            <input
+                type="checkbox"
+                :value="sc.id"
+                v-model="selectedSchoolClassIds"
+            >
+            {{ sc.name }}{{ sc.mechanism ? ' · ' + sc.mechanism : '' }}
+          </label>
+          <p v-if="schoolClasses.length === 0" class="class-picker-hint">暂无班级，请先下方新建</p>
+        </div>
+      </div>
+      <div class="new-class-row">
+        <input v-model="newClassName" type="text" placeholder="新建班级名称" class="modal-input">
+        <input v-model="newClassMechanism" type="text" placeholder="学校/机构" class="modal-input">
+        <button type="button" class="mini-btn" @click="addSchoolClass">新建班级</button>
+      </div>
+      <div>
+        教学班级（展示名，可留空自动取班级名）:
         <input id="classes_input" type="text" class="modal-input modal-input-wide">
       </div>
     </div>
@@ -575,6 +640,63 @@ function restoreCourse(courseId) {
 .modal-input-wide {
   width: calc(100% - 100px);
   max-width: 705px;
+}
+
+.new-class-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0;
+}
+
+.new-class-row .modal-input {
+  flex: 1;
+  min-width: 120px;
+  width: auto;
+}
+
+.mini-btn {
+  height: 45px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 5px;
+  background: rgb(72, 138, 248);
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.school-class-picker {
+  max-width: 705px;
+  margin-top: 8px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid rgb(218, 220, 224);
+  border-radius: 5px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.class-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 16px;
+  color: rgb(95, 99, 148);
+  cursor: pointer;
+}
+
+.class-option input {
+  width: 16px;
+  height: 16px;
+}
+
+.class-picker-hint {
+  margin: 0;
+  color: #999;
+  font-size: 14px;
 }
 
 .modal-footer {
