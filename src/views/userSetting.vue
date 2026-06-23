@@ -1,11 +1,24 @@
 <script setup lang="js" name="UserSettingsPage">
 import {useAccountStore} from "@/stores/account.js";
 import {storeToRefs} from "pinia";
-import {ref} from "vue";
+import {computed, onMounted, reactive, ref} from "vue";
 import request from "@/utils/request.js";
 import {useRouter} from "vue-router";
+import {toast} from '@/utils/toast.js';
+import PasswordInput from '@/components/PasswordInput.vue';
+import {INSTITUTION_OPTIONS, resolveMechanism} from '@/constants/institutions.js';
+import {
+  validateMechanism,
+  validateName,
+  validatePassword,
+  validatePasswordConfirm,
+  validatePhone,
+  validateStudentId,
+} from '@/utils/formValidate.js';
 
 const activeName = ref('first');
+const editingField = ref('');
+const saving = ref(false);
 
 const accountStore = useAccountStore();
 const {account} = storeToRefs(accountStore);
@@ -19,16 +32,57 @@ const mechanism = ref('')
 const email_or_phone = ref('')
 const status_number = ref('')
 const schoolClassName = ref('')
+const studentClassIds = ref([])
+const schoolClasses = ref([])
+
+const institutionOptions = INSTITUTION_OPTIONS
+
+const filteredSchoolClasses = computed(() => {
+  if (!mechanism.value) return schoolClasses.value
+  return schoolClasses.value.filter(sc => !sc.mechanism || sc.mechanism === mechanism.value)
+})
+
+const editDraft = reactive({
+  name: '',
+  status: '',
+  email_or_phone: '',
+  password: '',
+  passwordConfirm: '',
+  status_number: '',
+  mechanism: '',
+  customMechanism: '',
+  schoolClassIds: [],
+})
+
+const editErrors = reactive({
+  name: '',
+  status: '',
+  email_or_phone: '',
+  password: '',
+  passwordConfirm: '',
+  status_number: '',
+  mechanism: '',
+  customMechanism: '',
+  schoolClasses: '',
+})
+
+function mechanismToForm(value) {
+  const matched = INSTITUTION_OPTIONS.find(item => item.value === value && value !== '__other__')
+  if (matched) {
+    return { mechanism: value, customMechanism: '' }
+  }
+  return { mechanism: value ? '__other__' : '', customMechanism: value || '' }
+}
 
 function update() {
   if (!account.value) {
-    alert('请先登录')
+    toast.warning('请先登录')
     return
   }
   request.post("/editor/account", {account: account.value})
       .then((res) => {
         if (!res?.account) {
-          alert('获取账户信息失败')
+          toast.error('获取账户信息失败')
           return
         }
         account_1.value = res.account
@@ -41,98 +95,203 @@ function update() {
       })
       .catch(error => {
         console.error(error)
-        alert(error.message || "请求失败")
+        toast.error(error.message || "请求失败")
       })
 
   request.post("/editor/studentSchoolClass", {account: account.value})
       .then(res => {
         const list = Array.isArray(res) ? res : (res?.name ? [res] : [])
+        studentClassIds.value = list.map(item => item.id).filter(Boolean)
         schoolClassName.value = list.map(item => item.name).filter(Boolean).join('、')
       })
       .catch(() => {
+        studentClassIds.value = []
         schoolClassName.value = ''
       })
 }
 
-function saveField(field, label, currentValue) {
-  const value = prompt(`请输入新的${label}`, currentValue || '')
-  if (value === null) return
-  if (!value.trim()) {
-    alert(`${label}不能为空`)
-    return
+function loadSchoolClasses() {
+  request.post('/editor/listSchoolClasses', {})
+      .then(res => {
+        schoolClasses.value = res || []
+      })
+      .catch(err => console.error(err))
+}
+
+function clearEditErrors() {
+  Object.keys(editErrors).forEach(key => {
+    editErrors[key] = ''
+  })
+}
+
+function startEdit(field) {
+  if (editingField.value && editingField.value !== field) {
+    cancelEdit()
   }
-  const payload = {account: account.value}
-  payload[field] = value.trim()
-  request.put('/editor/updateAccount', payload)
-      .then((ok) => {
-        if (ok) {
-          alert('修改成功')
-          update()
-        } else {
-          alert('修改失败，请确认后端已重启')
-        }
-      })
-      .catch((err) => {
-        console.error(err)
-        alert('修改失败，请检查后端是否运行')
-      })
-}
+  editingField.value = field
+  clearEditErrors()
 
-function editName() {
-  saveField('name', '姓名', name.value)
-}
-
-function editMechanism() {
-  saveField('mechanism', '学校', mechanism.value)
-}
-
-function editStatusNumber() {
-  saveField('status_number', '学号', status_number.value)
-}
-
-function editPhone() {
-  saveField('email_or_phone', '手机号', email_or_phone.value === 'yes' ? '' : email_or_phone.value)
-}
-
-function editStatus() {
-  const pickStudent = confirm('点击「确定」设为学生，点击「取消」设为老师')
-  const newStatus = pickStudent ? '学生' : '老师'
-  request.put('/editor/updateAccount', {account: account.value, status: newStatus})
-      .then((ok) => {
-        if (ok) {
-          alert(`已设置为${newStatus}`)
-          update()
-        } else {
-          alert('修改失败')
-        }
-      })
-      .catch((err) => {
-        console.error(err)
-        alert('修改失败')
-      })
-}
-
-function changePassword() {
-  const value = prompt('请输入新密码（8~16位）')
-  if (value === null) return
-  if (value.length < 8 || value.length > 16) {
-    alert('密码长度必须在8~16位之间')
-    return
+  switch (field) {
+    case 'name':
+      editDraft.name = name.value
+      break
+    case 'status':
+      editDraft.status = status.value || '学生'
+      break
+    case 'email_or_phone':
+      editDraft.email_or_phone = email_or_phone.value === 'yes' ? '' : email_or_phone.value
+      break
+    case 'password':
+      editDraft.password = ''
+      editDraft.passwordConfirm = ''
+      break
+    case 'status_number':
+      editDraft.status_number = status_number.value
+      break
+    case 'mechanism': {
+      const form = mechanismToForm(mechanism.value)
+      editDraft.mechanism = form.mechanism
+      editDraft.customMechanism = form.customMechanism
+      break
+    }
+    case 'schoolClasses':
+      editDraft.schoolClassIds = [...studentClassIds.value]
+      break
+    default:
+      break
   }
-  request.put('/editor/change', {account: account.value, password: value.trim()})
-      .then((ok) => {
-        if (ok) {
-          alert('密码修改成功，请重新登录')
-          accountStore.logout()
-          router.push({ name: 'login' })
-        } else {
-          alert('密码修改失败')
-        }
+}
+
+function cancelEdit() {
+  editingField.value = ''
+  clearEditErrors()
+}
+
+function setEditError(field, message) {
+  editErrors[field] = message || ''
+}
+
+function validateEditField(field) {
+  switch (field) {
+    case 'name':
+      setEditError('name', validateName(editDraft.name))
+      break
+    case 'status':
+      setEditError('status', editDraft.status ? '' : '请选择角色')
+      break
+    case 'email_or_phone':
+      setEditError('email_or_phone', validatePhone(editDraft.email_or_phone))
+      break
+    case 'password':
+      setEditError('password', validatePassword(editDraft.password))
+      if (editDraft.passwordConfirm) validateEditField('passwordConfirm')
+      break
+    case 'passwordConfirm':
+      setEditError('passwordConfirm', validatePasswordConfirm(editDraft.password, editDraft.passwordConfirm))
+      break
+    case 'status_number':
+      setEditError('status_number', validateStudentId(editDraft.status_number))
+      break
+    case 'mechanism':
+      setEditError('mechanism', validateMechanism(editDraft.mechanism, editDraft.customMechanism))
+      if (editDraft.mechanism === '__other__') validateEditField('customMechanism')
+      break
+    case 'customMechanism':
+      setEditError('customMechanism', validateMechanism(editDraft.mechanism, editDraft.customMechanism))
+      break
+    case 'schoolClasses':
+      setEditError('schoolClasses', editDraft.schoolClassIds.length ? '' : '请至少选择一个行政班级')
+      break
+    default:
+      break
+  }
+}
+
+function validateEditForm(field) {
+  const fields = field === 'password'
+      ? ['password', 'passwordConfirm']
+      : field === 'mechanism'
+          ? (editDraft.mechanism === '__other__' ? ['mechanism', 'customMechanism'] : ['mechanism'])
+          : field === 'schoolClasses'
+              ? ['schoolClasses']
+              : [field]
+
+  fields.forEach(validateEditField)
+  return fields.every(item => !editErrors[item])
+}
+
+async function saveEdit(field) {
+  if (saving.value) return
+  if (!validateEditForm(field)) return
+
+  saving.value = true
+  try {
+    if (field === 'password') {
+      const ok = await request.put('/editor/change', {
+        account: account.value,
+        password: editDraft.password.trim(),
       })
-      .catch((err) => {
-        console.error(err)
-        alert('密码修改失败')
+      if (ok) {
+        toast.success('密码修改成功，请重新登录')
+        cancelEdit()
+        accountStore.logout()
+        router.push({ name: 'login' })
+      } else {
+        toast.error('密码修改失败')
+      }
+      return
+    }
+
+    if (field === 'schoolClasses') {
+      const ok = await request.put('/editor/updateStudentSchoolClasses', {
+        account: account.value,
+        school_class_ids: editDraft.schoolClassIds.map(Number),
       })
+      if (ok) {
+        toast.success('班级更新成功，已自动加入关联课程')
+        cancelEdit()
+        update()
+      } else {
+        toast.error('班级更新失败，请确认至少选择一个有效班级')
+      }
+      return
+    }
+
+    const payload = { account: account.value }
+    switch (field) {
+      case 'name':
+        payload.name = editDraft.name.trim()
+        break
+      case 'status':
+        payload.status = editDraft.status
+        break
+      case 'email_or_phone':
+        payload.email_or_phone = editDraft.email_or_phone.trim()
+        break
+      case 'status_number':
+        payload.status_number = editDraft.status_number.trim()
+        break
+      case 'mechanism':
+        payload.mechanism = resolveMechanism(editDraft.mechanism, editDraft.customMechanism)
+        break
+      default:
+        break
+    }
+
+    const ok = await request.put('/editor/updateAccount', payload)
+    if (ok) {
+      toast.success('修改成功')
+      cancelEdit()
+      update()
+    } else {
+      toast.error('修改失败，请确认后端已重启')
+    }
+  } catch (err) {
+    console.error(err)
+    toast.error('修改失败，请检查后端是否运行')
+  } finally {
+    saving.value = false
+  }
 }
 
 function maskPhone(phone) {
@@ -142,8 +301,12 @@ function maskPhone(phone) {
 }
 
 function bindHint(feature) {
-  alert(`${feature}功能暂未开放`)
+  toast.info(`${feature}功能暂未开放`)
 }
+
+onMounted(() => {
+  loadSchoolClasses()
+})
 
 update()
 </script>
@@ -152,10 +315,10 @@ update()
   <div class="user-settings-page">
     <div class="us-container">
       <div class="us-header">
-        <img src="@/assets/head.png" class="us-avatar"/>
+        <img src="@/assets/head.png" class="us-avatar" alt="头像"/>
         <div class="us-info">
           <h2 class="us-username">{{ name || account_1 }}</h2>
-          <button class="us-vip-btn">开通课堂派VIP</button>
+          <button type="button" class="us-vip-btn">开通课堂派VIP</button>
         </div>
       </div>
 
@@ -180,52 +343,276 @@ update()
         <h2 class="set_name">账号设置</h2>
         <ul class="accountReal">
           <li class="row-first">
-            <label>账号</label><span class="content">{{ account_1 }}</span>
+            <label>账号</label>
+            <span class="content">{{ account_1 }}</span>
           </li>
-          <li>
-            <label>所属角色</label><span class="content">{{ status }}</span>
-            <p class="right"><span @click="editStatus">去设置</span></p>
+
+          <li :class="{ 'row-editing': editingField === 'status' }">
+            <label>所属角色</label>
+            <div class="field-body">
+              <template v-if="editingField !== 'status'">
+                <span class="content">{{ status || '未设置' }}</span>
+              </template>
+              <template v-else>
+                <div class="inline-edit">
+                  <select
+                      v-model="editDraft.status"
+                      class="inline-input inline-select"
+                      :class="{ 'input-invalid': editErrors.status }"
+                      @change="validateEditField('status')"
+                  >
+                    <option value="学生">学生</option>
+                    <option value="老师">老师</option>
+                  </select>
+                  <p v-if="editErrors.status" class="field-error">{{ editErrors.status }}</p>
+                </div>
+              </template>
+            </div>
+            <div class="right">
+              <template v-if="editingField !== 'status'">
+                <span class="action-link" @click="startEdit('status')">去设置</span>
+              </template>
+              <template v-else>
+                <span class="action-link muted" @click="cancelEdit">取消</span>
+                <span class="action-link" :class="{ disabled: saving }" @click="saveEdit('status')">保存</span>
+              </template>
+            </div>
           </li>
-          <li>
-            <label>手机号</label><span class="content">{{ maskPhone(email_or_phone) }}</span>
-            <p class="right"><span @click="editPhone">更换手机号</span></p>
+
+          <li :class="{ 'row-editing': editingField === 'email_or_phone' }">
+            <label>手机号</label>
+            <div class="field-body">
+              <template v-if="editingField !== 'email_or_phone'">
+                <span class="content">{{ maskPhone(email_or_phone) }}</span>
+              </template>
+              <template v-else>
+                <div class="inline-edit">
+                  <input
+                      v-model="editDraft.email_or_phone"
+                      type="tel"
+                      maxlength="11"
+                      class="inline-input"
+                      :class="{ 'input-invalid': editErrors.email_or_phone }"
+                      placeholder="请输入 11 位手机号"
+                      @blur="validateEditField('email_or_phone')"
+                  >
+                  <p v-if="editErrors.email_or_phone" class="field-error">{{ editErrors.email_or_phone }}</p>
+                </div>
+              </template>
+            </div>
+            <div class="right">
+              <template v-if="editingField !== 'email_or_phone'">
+                <span class="action-link" @click="startEdit('email_or_phone')">更换手机号</span>
+              </template>
+              <template v-else>
+                <span class="action-link muted" @click="cancelEdit">取消</span>
+                <span class="action-link" :class="{ disabled: saving }" @click="saveEdit('email_or_phone')">保存</span>
+              </template>
+            </div>
           </li>
-          <li class="row-last">
-            <label>密码</label><span class="content">{{ password }}</span>
-            <p class="right"><span @click="changePassword">修改密码</span></p>
+
+          <li class="row-last" :class="{ 'row-editing': editingField === 'password' }">
+            <label>密码</label>
+            <div class="field-body">
+              <template v-if="editingField !== 'password'">
+                <span class="content">{{ password }}</span>
+              </template>
+              <template v-else>
+                <div class="inline-edit inline-edit-stack">
+                  <PasswordInput
+                      v-model="editDraft.password"
+                      placeholder="新密码（8~16 位，含字母和数字）"
+                      :invalid="!!editErrors.password"
+                      @blur="validateEditField('password')"
+                  />
+                  <p v-if="editErrors.password" class="field-error">{{ editErrors.password }}</p>
+                  <PasswordInput
+                      v-model="editDraft.passwordConfirm"
+                      placeholder="确认新密码"
+                      :invalid="!!editErrors.passwordConfirm"
+                      @blur="validateEditField('passwordConfirm')"
+                  />
+                  <p v-if="editErrors.passwordConfirm" class="field-error">{{ editErrors.passwordConfirm }}</p>
+                </div>
+              </template>
+            </div>
+            <div class="right">
+              <template v-if="editingField !== 'password'">
+                <span class="action-link" @click="startEdit('password')">修改密码</span>
+              </template>
+              <template v-else>
+                <span class="action-link muted" @click="cancelEdit">取消</span>
+                <span class="action-link" :class="{ disabled: saving }" @click="saveEdit('password')">保存</span>
+              </template>
+            </div>
           </li>
         </ul>
 
         <h2 class="set_name">基础信息</h2>
         <ul class="accountReal">
-          <li class="row-first">
+          <li class="row-first" :class="{ 'row-editing': editingField === 'name' }">
             <label>姓名</label>
-            <span class="content" v-if="name">{{ name }}</span>
-            <span class="hint" v-else>未完善</span>
-            <p class="right"><span @click="editName">编辑</span></p>
+            <div class="field-body">
+              <template v-if="editingField !== 'name'">
+                <span class="content" v-if="name">{{ name }}</span>
+                <span class="hint" v-else>未完善</span>
+              </template>
+              <template v-else>
+                <div class="inline-edit">
+                  <input
+                      v-model="editDraft.name"
+                      type="text"
+                      maxlength="20"
+                      class="inline-input"
+                      :class="{ 'input-invalid': editErrors.name }"
+                      placeholder="请输入中文姓名"
+                      @blur="validateEditField('name')"
+                  >
+                  <p v-if="editErrors.name" class="field-error">{{ editErrors.name }}</p>
+                </div>
+              </template>
+            </div>
+            <div class="right">
+              <template v-if="editingField !== 'name'">
+                <span class="action-link" @click="startEdit('name')">编辑</span>
+              </template>
+              <template v-else>
+                <span class="action-link muted" @click="cancelEdit">取消</span>
+                <span class="action-link" :class="{ disabled: saving }" @click="saveEdit('name')">保存</span>
+              </template>
+            </div>
           </li>
-          <li>
+
+          <li :class="{ 'row-editing': editingField === 'status_number' }">
             <label>学号</label>
-            <span class="content" v-if="status_number">{{ status_number }}</span>
-            <span class="hint" v-else>未完善</span>
-            <p class="right"><span @click="editStatusNumber">编辑</span></p>
+            <div class="field-body">
+              <template v-if="editingField !== 'status_number'">
+                <span class="content" v-if="status_number">{{ status_number }}</span>
+                <span class="hint" v-else>未完善</span>
+              </template>
+              <template v-else>
+                <div class="inline-edit">
+                  <input
+                      v-model="editDraft.status_number"
+                      type="text"
+                      inputmode="numeric"
+                      maxlength="20"
+                      class="inline-input"
+                      :class="{ 'input-invalid': editErrors.status_number }"
+                      placeholder="6~20 位数字"
+                      @input="editDraft.status_number = editDraft.status_number.replace(/\D/g, '')"
+                      @blur="validateEditField('status_number')"
+                  >
+                  <p v-if="editErrors.status_number" class="field-error">{{ editErrors.status_number }}</p>
+                </div>
+              </template>
+            </div>
+            <div class="right">
+              <template v-if="editingField !== 'status_number'">
+                <span class="action-link" @click="startEdit('status_number')">编辑</span>
+              </template>
+              <template v-else>
+                <span class="action-link muted" @click="cancelEdit">取消</span>
+                <span class="action-link" :class="{ disabled: saving }" @click="saveEdit('status_number')">保存</span>
+              </template>
+            </div>
           </li>
-          <li>
+
+          <li :class="{ 'row-editing': editingField === 'mechanism' }">
             <label>学校</label>
-            <span class="content" v-if="mechanism">{{ mechanism }}</span>
-            <span class="hint" v-else>未完善</span>
-            <p class="right"><span @click="editMechanism">编辑</span></p>
+            <div class="field-body">
+              <template v-if="editingField !== 'mechanism'">
+                <span class="content" v-if="mechanism">{{ mechanism }}</span>
+                <span class="hint" v-else>未完善</span>
+              </template>
+              <template v-else>
+                <div class="inline-edit inline-edit-stack">
+                  <select
+                      v-model="editDraft.mechanism"
+                      class="inline-input inline-select"
+                      :class="{ 'input-invalid': editErrors.mechanism }"
+                      @change="validateEditField('mechanism')"
+                  >
+                    <option value="">请选择学校</option>
+                    <option v-for="item in institutionOptions" :key="item.value" :value="item.value">
+                      {{ item.label }}
+                    </option>
+                  </select>
+                  <p v-if="editErrors.mechanism" class="field-error">{{ editErrors.mechanism }}</p>
+                  <template v-if="editDraft.mechanism === '__other__'">
+                    <input
+                        v-model="editDraft.customMechanism"
+                        type="text"
+                        maxlength="50"
+                        class="inline-input"
+                        :class="{ 'input-invalid': editErrors.customMechanism }"
+                        placeholder="请输入其他学校/机构名称"
+                        @blur="validateEditField('customMechanism')"
+                    >
+                    <p v-if="editErrors.customMechanism" class="field-error">{{ editErrors.customMechanism }}</p>
+                  </template>
+                </div>
+              </template>
+            </div>
+            <div class="right">
+              <template v-if="editingField !== 'mechanism'">
+                <span class="action-link" @click="startEdit('mechanism')">编辑</span>
+              </template>
+              <template v-else>
+                <span class="action-link muted" @click="cancelEdit">取消</span>
+                <span class="action-link" :class="{ disabled: saving }" @click="saveEdit('mechanism')">保存</span>
+              </template>
+            </div>
           </li>
+
           <li>
             <label>院系</label><span class="hint">未完善</span>
           </li>
           <li>
             <label>专业</label><span class="hint">未完善</span>
           </li>
-          <li>
+          <li :class="{ 'row-editing': editingField === 'schoolClasses' }">
             <label>班级</label>
-            <span class="content" v-if="schoolClassName">{{ schoolClassName }}</span>
-            <span class="hint" v-else>未完善</span>
+            <div class="field-body">
+              <template v-if="editingField !== 'schoolClasses'">
+                <span class="content" v-if="schoolClassName">{{ schoolClassName }}</span>
+                <span class="hint" v-else-if="status === '老师'">教师账号无需绑定行政班</span>
+                <span class="hint" v-else>未完善</span>
+              </template>
+              <template v-else>
+                <div class="inline-edit">
+                  <div class="class-picker" :class="{ 'picker-invalid': editErrors.schoolClasses }">
+                    <p class="class-picker-title">行政班级（可多选）</p>
+                    <label
+                        v-for="sc in filteredSchoolClasses"
+                        :key="sc.id"
+                        class="class-option"
+                    >
+                      <input
+                          type="checkbox"
+                          :value="sc.id"
+                          v-model="editDraft.schoolClassIds"
+                          @change="validateEditField('schoolClasses')"
+                      >
+                      {{ sc.name }}{{ sc.mechanism ? ' · ' + sc.mechanism : '' }}
+                    </label>
+                    <p v-if="filteredSchoolClasses.length === 0" class="class-picker-empty">
+                      {{ mechanism ? '该学校下暂无班级，请联系老师创建' : '请先完善学校信息' }}
+                    </p>
+                  </div>
+                  <p v-if="editErrors.schoolClasses" class="field-error">{{ editErrors.schoolClasses }}</p>
+                </div>
+              </template>
+            </div>
+            <div v-if="status === '学生'" class="right">
+              <template v-if="editingField !== 'schoolClasses'">
+                <span class="action-link" @click="startEdit('schoolClasses')">编辑</span>
+              </template>
+              <template v-else>
+                <span class="action-link muted" @click="cancelEdit">取消</span>
+                <span class="action-link" :class="{ disabled: saving }" @click="saveEdit('schoolClasses')">保存</span>
+              </template>
+            </div>
           </li>
           <li>
             <label>年级</label><span class="hint">未完善</span>
@@ -239,11 +626,11 @@ update()
         <ul class="accountReal">
           <li class="row-first">
             <label>邮箱绑定</label><span class="hint">未完善</span>
-            <p class="right"><span @click="bindHint('邮箱绑定')">立即绑定</span></p>
+            <p class="right"><span class="action-link" @click="bindHint('邮箱绑定')">立即绑定</span></p>
           </li>
           <li class="row-last">
             <label>微信绑定</label><span class="hint">未完善</span>
-            <p class="right"><span @click="bindHint('微信绑定')">立即绑定</span></p>
+            <p class="right"><span class="action-link" @click="bindHint('微信绑定')">立即绑定</span></p>
           </li>
         </ul>
       </div>
@@ -380,6 +767,12 @@ li {
   align-items: center;
 }
 
+li.row-editing {
+  align-items: flex-start;
+  padding-top: 18px;
+  padding-bottom: 18px;
+}
+
 .row-first {
   border-top-right-radius: 5px;
 }
@@ -396,12 +789,39 @@ label {
   flex-shrink: 0;
 }
 
+.field-body {
+  flex: 1;
+  min-width: 0;
+  padding-right: 180px;
+}
+
 .right {
-  cursor: pointer;
   display: flex;
+  gap: 16px;
   position: absolute;
   right: 80px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+li.row-editing .right {
+  top: 24px;
+  transform: none;
+}
+
+.action-link {
+  cursor: pointer;
   color: rgb(66, 133, 244);
+  white-space: nowrap;
+}
+
+.action-link.muted {
+  color: #909399;
+}
+
+.action-link.disabled {
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 .content {
@@ -414,5 +834,107 @@ label {
 
 .notify-hint {
   padding: 24px 0;
+}
+
+.inline-edit {
+  max-width: 360px;
+}
+
+.inline-edit-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 420px;
+}
+
+.inline-input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid rgb(218, 220, 224);
+  border-radius: 6px;
+  font-size: 15px;
+  color: #303133;
+  box-sizing: border-box;
+  background: #fff;
+}
+
+.inline-input:focus {
+  outline: none;
+  border-color: rgb(72, 138, 248);
+  box-shadow: 0 0 0 3px rgba(72, 138, 248, 0.12);
+}
+
+.inline-input.input-invalid {
+  border-color: #f56c6c;
+}
+
+.inline-input.input-invalid:focus {
+  border-color: #f56c6c;
+  box-shadow: 0 0 0 3px rgba(245, 108, 108, 0.12);
+}
+
+.inline-select {
+  cursor: pointer;
+}
+
+.field-error {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #f56c6c;
+}
+
+.inline-edit-stack :deep(.password-field) {
+  max-width: none;
+}
+
+.inline-edit-stack :deep(.password-input) {
+  height: 40px;
+  padding: 4px 56px 4px 12px;
+  font-size: 15px;
+  border-radius: 6px;
+}
+
+.inline-edit-stack :deep(.password-input::placeholder) {
+  font-size: 14px;
+}
+
+.inline-edit-stack :deep(.password-toggle) {
+  font-size: 13px;
+}
+
+.class-picker {
+  padding: 12px;
+  border: 1px solid rgb(218, 220, 224);
+  border-radius: 6px;
+  background: #fff;
+  max-width: 420px;
+}
+
+.class-picker.picker-invalid {
+  border-color: #f56c6c;
+}
+
+.class-picker-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: #666;
+}
+
+.class-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 14px;
+  color: #303133;
+  cursor: pointer;
+}
+
+.class-picker-empty {
+  margin: 0;
+  color: #999;
+  font-size: 13px;
 }
 </style>

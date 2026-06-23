@@ -4,6 +4,7 @@ import {computed, ref, watch} from "vue";
 import request from "@/utils/request.js";
 import {useAccountStore} from "@/stores/account.js";
 import {storeToRefs} from "pinia";
+import {toast} from '@/utils/toast.js';
 
 const route = useRoute();
 const accountStore = useAccountStore();
@@ -79,7 +80,7 @@ function initPage() {
       .then(() => loadContent())
       .catch(error => {
         console.error(error);
-        alert('加载作业失败');
+        toast.error('加载作业失败');
       });
 }
 
@@ -123,11 +124,11 @@ function selectSubmission(item) {
 function submitHomework() {
   const text = submissionText.value.trim();
   if (!text) {
-    alert('请先填写作业内容');
+    toast.warning('请先填写作业内容');
     return;
   }
   if (mySubmission.value) {
-    alert('您已提交过该作业');
+    toast.warning('您已提交过该作业');
     return;
   }
   request.post("/editor/addContent", {
@@ -137,25 +138,25 @@ function submitHomework() {
     details: text,
   }).then((ok) => {
     if (ok) {
-      alert('作业提交成功');
+      toast.success('作业提交成功');
       loadContent();
     } else {
-      alert('提交失败');
+      toast.error('提交失败');
     }
   }).catch((err) => {
     console.error(err);
-    alert('提交失败');
+    toast.error('提交失败');
   });
 }
 
 function saveGrade() {
   if (!selectedSubmission.value) {
-    alert('请先选择要批阅的提交');
+    toast.warning('请先选择要批阅的提交');
     return;
   }
   const score = Number(gradeScore.value);
   if (Number.isNaN(score) || score < 0 || score > 100) {
-    alert('成绩须在 0~100 之间');
+    toast.warning('成绩须在 0~100 之间');
     return;
   }
   request.put("/editor/setScore", {
@@ -164,20 +165,20 @@ function saveGrade() {
     account: selectedSubmission.value.account,
   }).then((ok) => {
     if (ok) {
-      alert('批阅成功');
+      toast.success('批阅成功');
       loadContent();
     } else {
-      alert('批阅失败');
+      toast.error('批阅失败');
     }
   }).catch((err) => {
     console.error(err);
-    alert('批阅失败');
+    toast.error('批阅失败');
   });
 }
 
 function remindSubmit() {
   if (!classId.value) {
-    alert('缺少课程信息，请从课程页进入作业');
+    toast.warning('缺少课程信息，请从课程页进入作业');
     return;
   }
   request.post('/editor/remindHomework', {
@@ -186,13 +187,13 @@ function remindSubmit() {
     teacher_account: account.value,
   }).then(ok => {
     if (ok) {
-      alert('已向未提交学生发送催交通知');
+      toast.success('已向未提交学生发送催交通知');
     } else {
-      alert('所有学生均已提交，无需催交');
+      toast.info('所有学生均已提交，无需催交');
     }
   }).catch(err => {
     console.error(err);
-    alert('催交失败');
+    toast.error('催交失败');
   });
 }
 </script>

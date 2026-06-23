@@ -11,6 +11,7 @@ import teacherClass from "@/views/teacherClass.vue";
 import courseContent from "@/views/courseContent.vue";
 import homeworkContent from "@/views/HomeworkContent.vue";
 import {useAccountStore} from "@/stores/account.js";
+import {unlockBodyScroll} from '@/utils/scrollLock.js';
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -62,6 +63,10 @@ const router = createRouter({
         }
     ]
     },],
+})
+
+router.afterEach(() => {
+  unlockBodyScroll()
 })
 
 router.beforeEach((to) => {

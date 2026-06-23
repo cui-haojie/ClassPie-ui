@@ -1,4 +1,5 @@
 import axios from "axios"
+import { toast } from '@/utils/toast.js'
 
 const request = axios.create({
     baseURL: import.meta.env.DEV ? '/' : 'http://localhost:9090',
@@ -8,7 +9,9 @@ const request = axios.create({
 // request拦截器
 // 可以自请求发送前对请求做一些处理
 request.interceptors.request.use(config => {
-    config.headers['Content-Type'] = 'application/json;charset=UTF-8';
+    if (!(config.data instanceof FormData)) {
+        config.headers['Content-Type'] = 'application/json;charset=UTF-8';
+    }
     return config;
 }, error => {
     return Promise.reject(error);
@@ -33,13 +36,13 @@ request.interceptors.response.use(
     error => {
         const status = error.response?.status
         if (status === 404) {
-            alert('未找到请求接口')
+            toast.error('未找到请求接口')
             console.log("未找到请求接口")
         } else if (status === 500) {
-            alert('系统异常，请检查后端控制台')
+            toast.error('系统异常，请检查后端控制台')
             console.log("系统异常，请检查后端控制台")
         } else if (!error.response) {
-            alert('无法连接后端，请确认 ClassPiServer 已在 9090 端口启动')
+            toast.error('无法连接后端，请确认 ClassPiServer 已在 9090 端口启动')
             console.error(error)
         } else {
             console.error(error)

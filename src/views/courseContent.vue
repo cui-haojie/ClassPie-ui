@@ -2,8 +2,11 @@
 import {useRoute,useRouter} from "vue-router";
 import {useAccountStore} from "@/stores/account.js";
 import {storeToRefs} from "pinia";
-import {ref, onMounted,computed} from "vue";
+import {ref, onMounted, onBeforeUnmount, computed} from "vue";
 import request from "@/utils/request.js";
+import {toast} from '@/utils/toast.js';
+import {lockBodyScroll, unlockBodyScroll} from '@/utils/scrollLock.js';
+import {SEMESTER_OPTIONS, formatSemester} from '@/constants/semesters.js';
 
 /**
  * @typedef {Object} Homework
@@ -39,13 +42,15 @@ const teacher_account = ref('')
 const class_time = ref('')
 const class_name = ref('')
 const selected_classes = ref('')
+const semester = ref('')
 const code = ref('')
 const is_pinned = ref('')
 const count = ref(0)
 const members = ref([])
 const activeSection = ref('homework')
 const showEditCourse = ref(false)
-const editForm = ref({ class_name: '', class_time: '', selected_classes: '' })
+const editForm = ref({ class_name: '', class_time: '', selected_classes: '', semester: '' })
+const semesterOptions = SEMESTER_OPTIONS
 
 request.post("/editor/account",{account: account.value})
     .then((res) => {
@@ -91,12 +96,14 @@ request.post("/editor/getCourseById", {id: course_id.value})
       class_time.value = resClassTime;
       class_name.value = resClassName;
       selected_classes.value = resSelectedClasses;
+      semester.value = res.semester || '';
       code.value = resCode;
       is_pinned.value = resIsPinned;
       editForm.value = {
         class_name: resClassName,
         class_time: resClassTime,
         selected_classes: resSelectedClasses,
+        semester: res.semester || '',
       }
     })
 
@@ -109,7 +116,7 @@ loadMembers()
 
 function openEditCourse() {
   if (status.value !== '老师') {
-    alert('仅课程负责人可编辑')
+    toast.warning('仅课程负责人可编辑')
     return
   }
   showEditCourse.value = true
@@ -122,13 +129,15 @@ function saveCourseEdit() {
     class_name: editForm.value.class_name,
     class_time: editForm.value.class_time,
     selected_classes: editForm.value.selected_classes,
+    semester: editForm.value.semester,
   }).then(ok => {
     if (ok) {
-      alert('课程信息已更新')
+      toast.success('课程信息已更新')
       showEditCourse.value = false
       class_name.value = editForm.value.class_name
       class_time.value = editForm.value.class_time
       selected_classes.value = editForm.value.selected_classes
+      semester.value = editForm.value.semester
     }
   })
 }
@@ -137,18 +146,13 @@ request.post("/editor/getCountById", {id: course_id.value})
   count.value = res;
 })
 
-const preventTouch = (e) => {
-  e.preventDefault();
-};
-
 const around = ref(null);
 const createHomework = ref(null);
 
 function addHomework(){
   around.value.style.display = 'block';
   createHomework.value.style.display = 'block';
-  document.body.style.overflow = 'hidden';
-  document.addEventListener('touchmove', preventTouch, { passive: false });
+  lockBodyScroll();
 }
 
 const checkedOptions = ref({
@@ -185,11 +189,11 @@ const type = computed(() => {
 
 function checkType() {
   if (type.value === null) {
-    alert("请勾选类型！")
+    toast.warning("请勾选类型！")
     return false;
   }
   if(!title_2.value.trim()){
-    alert("请填写作业名称")
+    toast.warning("请填写作业名称")
     return false;
   }
   return true;
@@ -210,14 +214,14 @@ function confirmHomework() {
     request.post("/editor/addHomework", {homework:homework.value,class_id:Number(course_id.value)})
         .then((res) => {
           if (res) {
-            alert("作业添加成功！");
+            toast.success("作业添加成功！");
             cancel();
             loadHomework();
           }
         })
         .catch(error => {
           console.error("完整错误:", error);
-          alert(error.response?.data?.message || "提交失败");
+          toast.error(error.response?.data?.message || "提交失败");
         });
   }
 }
@@ -225,10 +229,12 @@ function confirmHomework() {
 function cancel() {
   around.value.style.display = 'none';
   createHomework.value.style.display = 'none';
-  document.body.style.overflow = 'visible';
-  document.removeEventListener('touchmove', preventTouch);
-
+  unlockBodyScroll();
 }
+
+onBeforeUnmount(() => {
+  unlockBodyScroll();
+});
 
 const num = ref(0)
 const class_id = Number(course_id.value)
@@ -237,7 +243,7 @@ request.post("/editor/getCountByClassId", {class_id:class_id})
   num.value = res;
 })
     .catch(error => {
-      alert(error)
+      toast.error('加载失败')
     })
 
 const home_work = ref([]);
@@ -249,7 +255,7 @@ request.post("/editor/getHomeworkByClassId", {class_id:class_id})
     console.log(res);
   })
     .catch(error => {
-      alert(error)
+      toast.error('加载失败')
     })
 }
 
@@ -319,6 +325,7 @@ function handleHomework(homeworkId) {
   <div style="justify-content: center;width: 1469px;margin: auto">
     <div style="padding-top: 100px" class="top">
       <div class="headTop">
+        <span class="course-semester-badge">{{ formatSemester(semester) }}</span>
         <h1 style="margin-top: 10px;color: #FFFFFF;font-size: 40px;font-weight: 450">{{ class_name }}</h1>
         <p style="font-size: 20px;font-weight: 450;margin-bottom: 70px">{{selected_classes}}</p>
         <p style="margin-top: 70px"><i class="iconfont icon-erweima"/> 加课码：{{code}} 已有{{count}}人加入</p>
@@ -376,6 +383,9 @@ function handleHomework(homeworkId) {
       <div class="edit-course-box">
         <h3>编辑课程</h3>
         <input v-model="editForm.class_name" placeholder="课程名称" class="edit-input"/>
+        <select v-model="editForm.semester" class="edit-input edit-select">
+          <option v-for="item in semesterOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+        </select>
         <input v-model="editForm.class_time" placeholder="上课时间" class="edit-input"/>
         <input v-model="editForm.selected_classes" placeholder="教学班级" class="edit-input"/>
         <div class="edit-actions">
@@ -396,6 +406,16 @@ function handleHomework(homeworkId) {
   border-top-left-radius: 15px;
   border-top-right-radius: 15px;
   padding: 24px;
+  position: relative;
+}
+
+.course-semester-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 14px;
 }
 
 .top {
@@ -609,6 +629,11 @@ function handleHomework(homeworkId) {
   padding: 0 12px;
   border: 1px solid #ddd;
   border-radius: 6px;
+}
+
+.edit-select {
+  background: #fff;
+  cursor: pointer;
 }
 
 .edit-actions {

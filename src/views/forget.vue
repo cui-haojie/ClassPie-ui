@@ -1,6 +1,7 @@
 <script setup lang="js" name="forget">
 import {RouterView, RouterLink, useRoute, useRouter} from "vue-router";
 import request from "@/utils/request.js";
+import {toast} from '@/utils/toast.js';
 import {nextTick} from "vue";
 
 const route = useRoute();
@@ -15,7 +16,7 @@ function next() {
   request.post('/editor/check', account)
       .then(response => {
         if (!response) {
-          alert("不存在的账户")
+          toast.error("不存在的账户")
         } else {
           forget.style.display = "none";
           confirm.style.display = "block";
@@ -23,34 +24,32 @@ function next() {
       })
       .catch(error => {
         console.log(error)
-        alert(error)
+        toast.error('请求失败，请稍后重试')
       })
 }
 
 function confirmPassword() {
   let password = document.getElementById("newPassword").value.trim();
   if (password.length > 16 || password.length < 8) {
-    alert("密码长度必须大于8小于16")
+    toast.warning("密码长度必须大于8小于16")
     return;
   }
   let account = document.getElementById("account").value.trim();
   console.log(account);
-  let result = confirm(`确认将密码修改为：${password}`);
-  if (result) {
-    request.put('/editor/change',
-        {password: password, account: account})
-        .then(response => {
-          if (response) {
-            router.push({name: 'login'})
-          } else {
-            alert("修改发生错误")
-          }
-        })
-        .catch(error => {
-          console.log(error)
-          alert(error)
-        })
-  }
+  request.put('/editor/change',
+      {password: password, account: account})
+      .then(response => {
+        if (response) {
+          toast.success('密码修改成功')
+          router.push({name: 'login'})
+        } else {
+          toast.error("修改发生错误")
+        }
+      })
+      .catch(error => {
+        console.log(error)
+        toast.error('请求失败，请稍后重试')
+      })
 }
 
 
