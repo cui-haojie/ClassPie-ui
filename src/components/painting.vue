@@ -3,30 +3,32 @@
 </script>
 
 <template>
-<div class="painting">
-<img src="../assets/classPai.png" alt="商标" class="paintingImg">
-  <img src="../assets/newbg.png" alt="背景" class="bgImg">
-</div>
+  <div class="painting">
+    <img src="../assets/classPai.png" alt="商标" class="paintingImg">
+    <img src="../assets/newbg.png" alt="背景" class="bgImg">
+  </div>
 </template>
 
 <style scoped>
 .painting {
   display: flex;
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  background-color: rgb(248,249,250);
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 1;
+  max-width: 640px;
+  min-width: 0;
 }
+
 .paintingImg {
-  left: 78px;
-  position: absolute;
-  top: 55px;
+  margin-bottom: 24px;
+  max-width: 100%;
+  height: auto;
 }
+
 .bgImg {
-  left: 285px;
-  position: relative;
-  top: 115px;
-  height: 700px;
+  max-width: 100%;
+  height: auto;
+  max-height: 560px;
+  object-fit: contain;
 }
 </style>

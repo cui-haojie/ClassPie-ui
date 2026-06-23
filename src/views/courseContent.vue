@@ -42,6 +42,10 @@ const selected_classes = ref('')
 const code = ref('')
 const is_pinned = ref('')
 const count = ref(0)
+const members = ref([])
+const activeSection = ref('homework')
+const showEditCourse = ref(false)
+const editForm = ref({ class_name: '', class_time: '', selected_classes: '' })
 
 request.post("/editor/account",{account: account.value})
     .then((res) => {
@@ -89,7 +93,45 @@ request.post("/editor/getCourseById", {id: course_id.value})
       selected_classes.value = resSelectedClasses;
       code.value = resCode;
       is_pinned.value = resIsPinned;
+      editForm.value = {
+        class_name: resClassName,
+        class_time: resClassTime,
+        selected_classes: resSelectedClasses,
+      }
     })
+
+function loadMembers() {
+  request.post('/editor/getCourseMembers', { id: Number(course_id.value) })
+      .then(res => { members.value = Array.isArray(res) ? res : [] })
+}
+
+loadMembers()
+
+function openEditCourse() {
+  if (status.value !== '老师') {
+    alert('仅课程负责人可编辑')
+    return
+  }
+  showEditCourse.value = true
+}
+
+function saveCourseEdit() {
+  request.put('/editor/updateCourse', {
+    id: Number(course_id.value),
+    teacher_account: account.value,
+    class_name: editForm.value.class_name,
+    class_time: editForm.value.class_time,
+    selected_classes: editForm.value.selected_classes,
+  }).then(ok => {
+    if (ok) {
+      alert('课程信息已更新')
+      showEditCourse.value = false
+      class_name.value = editForm.value.class_name
+      class_time.value = editForm.value.class_time
+      selected_classes.value = editForm.value.selected_classes
+    }
+  })
+}
 request.post("/editor/getCountById", {id: course_id.value})
 .then((res) => {
   count.value = res;
@@ -169,7 +211,8 @@ function confirmHomework() {
         .then((res) => {
           if (res) {
             alert("作业添加成功！");
-            cancel();  // 成功后关闭弹窗
+            cancel();
+            loadHomework();
           }
         })
         .catch(error => {
@@ -216,6 +259,7 @@ function handleHomework(homeworkId) {
   router.push({
     name: 'homeworkContent',
     params: {id: homeworkId},
+    query: { classId: course_id.value },
   })
 }
 
@@ -282,19 +326,24 @@ function handleHomework(homeworkId) {
       <div class = "headBottom">
         <div class = "headBottomContent">
           <div class = "title" id = "classLearn">课程学习</div>
-          <div class = "title">学情分析</div>
-          <div class = "title">成绩管理</div>
-          <div class = "title">课程介绍</div>
-          <div class = "title">知识图谱</div>
+          <div class = "title" @click="activeSection='members'">成员({{count}})</div>
+          <div class = "title" @click="openEditCourse">编辑课程</div>
         </div>
       </div>
     </div>
     <div class = "mid">
-      <div class="midTitle" style="padding-left: 0">互动课件</div>
-      <div class="midTitle">作业</div>
-      <div class="midTitle">资料</div>
-      <div class="midTitle">公告</div>
+      <div class="midTitle" :class="{active: activeSection==='homework'}" @click="activeSection='homework'">作业</div>
+      <div class="midTitle" :class="{active: activeSection==='members'}" @click="activeSection='members'">成员</div>
     </div>
+    <div v-if="activeSection==='members'" class="members-panel">
+      <div class="member-row member-header">
+        <span>账号</span><span>姓名</span><span>角色</span><span>学号</span>
+      </div>
+      <div class="member-row" v-for="m in members" :key="m.account">
+        <span>{{ m.account }}</span><span>{{ m.name }}</span><span>{{ m.status }}</span><span>{{ m.status_number || '-' }}</span>
+      </div>
+    </div>
+    <template v-else>
     <div class = "mid_container">
       <div id = "acts">共{{num}}个活动</div>
       <div class = "teacher_create" id = "addHomework_container">
@@ -319,6 +368,19 @@ function handleHomework(homeworkId) {
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+    </template>
+    <div v-if="showEditCourse" class="edit-course-modal" @click.self="showEditCourse=false">
+      <div class="edit-course-box">
+        <h3>编辑课程</h3>
+        <input v-model="editForm.class_name" placeholder="课程名称" class="edit-input"/>
+        <input v-model="editForm.class_time" placeholder="上课时间" class="edit-input"/>
+        <input v-model="editForm.selected_classes" placeholder="教学班级" class="edit-input"/>
+        <div class="edit-actions">
+          <button @click="showEditCourse=false">取消</button>
+          <button class="primary" @click="saveCourseEdit">保存</button>
         </div>
       </div>
     </div>
@@ -496,6 +558,72 @@ function handleHomework(homeworkId) {
   font-size: small;
   margin:4px 0;
   color: rgb(95, 99, 104);
+}
+
+.midTitle.active {
+  color: rgb(66, 133, 244);
+  font-weight: 600;
+}
+
+.members-panel {
+  width: 1469px;
+  margin-top: 20px;
+  border: 1px solid rgb(231, 235, 240);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.member-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  padding: 12px 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.member-header {
+  background: #f8f9fa;
+  font-weight: 600;
+}
+
+.edit-course-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.edit-course-box {
+  background: #fff;
+  padding: 24px;
+  border-radius: 8px;
+  width: 420px;
+}
+
+.edit-input {
+  width: 100%;
+  height: 40px;
+  margin: 8px 0;
+  padding: 0 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.edit-actions .primary {
+  background: rgb(66,133,244);
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
 }
 
 p {

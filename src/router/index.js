@@ -10,6 +10,7 @@ import userSetting from "@/views/userSetting.vue"
 import teacherClass from "@/views/teacherClass.vue";
 import courseContent from "@/views/courseContent.vue";
 import homeworkContent from "@/views/HomeworkContent.vue";
+import {useAccountStore} from "@/stores/account.js";
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -61,6 +62,18 @@ const router = createRouter({
         }
     ]
     },],
+})
+
+router.beforeEach((to) => {
+  const accountStore = useAccountStore()
+  const publicPaths = ['login', 'register', 'forget', 'main']
+  const needAuth = !publicPaths.includes(to.name)
+  if (needAuth && !accountStore.account) {
+    return { name: 'login' }
+  }
+  if ((to.name === 'login' || to.name === 'register' || to.name === 'forget') && accountStore.account) {
+    return { name: 'mainClass' }
+  }
 })
 
 export default router

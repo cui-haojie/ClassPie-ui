@@ -1,64 +1,43 @@
-<script setup lang="js" name="HomeworkContent" xmlns="http://www.w3.org/1999/html">
-import {useRoute,useRouter} from "vue-router";
-import {computed, ref} from "vue";
+<script setup lang="js" name="HomeworkContent">
+import {useRoute} from "vue-router";
+import {computed, ref, watch} from "vue";
 import request from "@/utils/request.js";
 import {useAccountStore} from "@/stores/account.js";
 import {storeToRefs} from "pinia";
 
-/**
- * @typedef {Object} Homework
- * @property {number} homework_id
- * @property {string} name
- * @property {string} type
- * @property {string} deadline
- * @property {boolean} isCorrect
- * @property {Number} score
- * @property {string} submitter
- * @property {string} details
- */
-
-const router = useRouter();
 const route = useRoute();
-
 const accountStore = useAccountStore();
 const {account} = storeToRefs(accountStore);
+const classId = ref(Number(route.query.classId || 0));
 
-const studentTitle = ref("");
-const teacherTitle = ref("");
+const studentTitle = ref(null);
+const teacherTitle = ref(null);
+const details_container = ref(null);
+const homeworks = ref(null);
+const comment_details = ref(null);
+
 const status = ref("");
-const details_container = ref('');
-const homeworks = ref('');
-const comment_details = ref('');
-
-const name = ref('');
-const homework_id = ref(route.params.id);
-const type = ref('');
-const deadline = ref('');
-const isCorrect = ref(false);
-const score = ref(0);
-const submitter = ref('');
-const details = ref('');
+const homework_id = ref(Number(route.params.id));
 const homework = ref({
   homework_id: homework_id.value,
-  name: name.value,
-  type: type.value,
-  deadline: deadline.value,
-  isCorrect: isCorrect.value,
-  score: score.value,
-  submitter: submitter.value,
-  details: details.value,
-})
-const contents = ref([]);
+  name: '',
+  type: '',
+  deadline: '',
+  isCorrect: false,
+  score: 0,
+  content_id: 0,
+  details: '',
+});
 
-const content_id = ref(route.params.id);
-const account_1 = ref('');
-const score_2 = ref(0);
-const details_2 = ref('');
-const content = ref({
-  content_id: content_id.value,
-  account: account_1.value,
-  score: score_2.value,
-  details: details_2.value,
+const contents = ref([]);
+const selectedSubmission = ref(null);
+const gradeScore = ref(0);
+const submissionText = ref('');
+const mySubmission = ref(null);
+
+const homeworkContentId = computed(() => {
+  const cid = homework.value?.content_id;
+  return cid && cid > 0 ? Number(cid) : homework_id.value;
 });
 
 function checkStatus() {
@@ -75,163 +54,246 @@ function checkStatus() {
       })
 }
 
-checkStatus()
+function loadHomework() {
+  return request.post("/editor/getHomeworkById", {homework_id: homework_id.value})
+      .then(res => {
+        if (res) {
+          homework.value = res;
+        }
+      })
+}
 
-request.post("/editor/getHomeworkById",{homework_id:Number(homework_id.value)})
-.then(res => {
-  homework.value = res;
-})
-.catch(error => {
-  alert(error)
-})
+function loadContent() {
+  return request.post("/editor/getContentById", {contentId: homeworkContentId.value})
+      .then((res) => {
+        contents.value = Array.isArray(res) ? res : [];
+        mySubmission.value = contents.value.find(item => item.account === account.value) || null;
+        if (mySubmission.value) {
+          submissionText.value = mySubmission.value.details || '';
+        }
+      })
+}
 
+function initPage() {
+  loadHomework()
+      .then(() => loadContent())
+      .catch(error => {
+        console.error(error);
+        alert('加载作业失败');
+      });
+}
+
+checkStatus();
+initPage();
+
+watch(homeworkContentId, () => {
+  loadContent();
+});
 
 function submit() {
   details_container.value.style.display = "none";
+  comment_details.value.style.display = "none";
   homeworks.value.style.display = "block";
 }
 
 function showDetails() {
-  details_container.value.style.display = "block"
-  homeworks.value.style.display = "none";
-}
-
-function comment() {
- comment_details.value.style.display = "block";
- details_container.value.style.display = "none";
-}
-
-function showDetails_2() {
   details_container.value.style.display = "block";
+  homeworks.value.style.display = "none";
   comment_details.value.style.display = "none";
 }
 
-
-function loadContent() {
-  request.post("/editor/getContentById",{content_id:Number(content_id.value)})
-  .then((res) => {
-    contents.value = res;
-    alert("作业加载成功！");
-    console.log(contents.value);
-  })
-  .catch(error => {
-    alert(error)
-  })
+function comment() {
+  comment_details.value.style.display = "block";
+  details_container.value.style.display = "none";
+  homeworks.value.style.display = "none";
+  if (contents.value.length > 0 && !selectedSubmission.value) {
+    selectSubmission(contents.value[0]);
+  }
 }
-loadContent();
+
+function showDetails_2() {
+  showDetails();
+}
+
+function selectSubmission(item) {
+  selectedSubmission.value = item;
+  gradeScore.value = item.score ?? 0;
+}
+
+function submitHomework() {
+  const text = submissionText.value.trim();
+  if (!text) {
+    alert('请先填写作业内容');
+    return;
+  }
+  if (mySubmission.value) {
+    alert('您已提交过该作业');
+    return;
+  }
+  request.post("/editor/addContent", {
+    content_id: homeworkContentId.value,
+    account: account.value,
+    score: 0,
+    details: text,
+  }).then((ok) => {
+    if (ok) {
+      alert('作业提交成功');
+      loadContent();
+    } else {
+      alert('提交失败');
+    }
+  }).catch((err) => {
+    console.error(err);
+    alert('提交失败');
+  });
+}
+
+function saveGrade() {
+  if (!selectedSubmission.value) {
+    alert('请先选择要批阅的提交');
+    return;
+  }
+  const score = Number(gradeScore.value);
+  if (Number.isNaN(score) || score < 0 || score > 100) {
+    alert('成绩须在 0~100 之间');
+    return;
+  }
+  request.put("/editor/setScore", {
+    score,
+    content_id: homeworkContentId.value,
+    account: selectedSubmission.value.account,
+  }).then((ok) => {
+    if (ok) {
+      alert('批阅成功');
+      loadContent();
+    } else {
+      alert('批阅失败');
+    }
+  }).catch((err) => {
+    console.error(err);
+    alert('批阅失败');
+  });
+}
+
+function remindSubmit() {
+  if (!classId.value) {
+    alert('缺少课程信息，请从课程页进入作业');
+    return;
+  }
+  request.post('/editor/remindHomework', {
+    homework_id: homework_id.value,
+    class_id: classId.value,
+    teacher_account: account.value,
+  }).then(ok => {
+    if (ok) {
+      alert('已向未提交学生发送催交通知');
+    } else {
+      alert('所有学生均已提交，无需催交');
+    }
+  }).catch(err => {
+    console.error(err);
+    alert('催交失败');
+  });
+}
 </script>
 
 <template>
-  <div id = "body">
-    <div class = "title_container" id = "teacherTitle" ref = "teacherTitle">
-      <div class = "title" @click = "showDetails_2">详情</div>
-      <div class = "title">AI批阅设置</div>
-      <div class = "title" @click = "comment">批阅</div>
+  <div id="body">
+    <div class="title_container" id="teacherTitle" ref="teacherTitle" style="display: none">
+      <div class="title" @click="showDetails_2">详情</div>
+      <div class="title" @click="comment">批阅</div>
+      <div class="title" @click="remindSubmit">催交</div>
     </div>
-    <div class = "title_container" id = "studentTitle" ref = "studentTitle">
-      <div class = "title" @click = "showDetails">详情</div>
-      <div class = "title" @click = "submit">提交作业</div>
+    <div class="title_container" id="studentTitle" ref="studentTitle" style="display: none">
+      <div class="title" @click="showDetails">详情</div>
+      <div class="title" @click="submit">提交作业</div>
     </div>
-    <div id = "homeworks_container" ref="homeworks">
-    <div class = "homeworks">
-      <div class = "box">
-        <div class = "homework">
-          <img src="../assets/homework.png" alt="作业" style="width: 100px">
-          <div class = "homeworkContent">
-            <div class = "homeworkTitle">
-              {{homework.name}}
-            </div>
-            <div class = "homeworkType">
-              提交截止时间：
-              {{homework.deadline}} | 未截止 | {{homework.type}} 100分
-            </div>
-            <div class = "isCorrect">
-              <!--                {{homework.isCorrect}} {{homework.score}}-->
+
+    <div id="homeworks_container" ref="homeworks" style="display: none">
+      <div class="homeworks">
+        <div class="box">
+          <div class="homework">
+            <img src="../assets/homework.png" alt="作业" style="width: 100px">
+            <div class="homeworkContent">
+              <div class="homeworkTitle">{{ homework.name }}</div>
+              <div class="homeworkType">
+                提交截止时间：{{ homework.deadline }} | {{ homework.type }} 100分
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
-      <div class = "bottom_container">
+      <div class="bottom_container">
         <div>提交内容</div>
       </div>
-      <div class = "bottom_box">
-        <div>
-        老师批阅
-        </div>
-        <div>
-          成绩
-        </div>
-        <div>
-          {{homework.score}} / 100
-        </div>
+      <div class="bottom_box" v-if="mySubmission">
+        <div>我的提交</div>
+        <div style="margin-top: 12px; white-space: pre-wrap;">{{ mySubmission.details }}</div>
+        <div style="margin-top: 12px;">成绩：{{ mySubmission.score }} / 100</div>
       </div>
-      <div class = "most_bottom">
-        <div>
-<textarea
-    id="homework_submission"
-    class="homework_submission"
-    placeholder="作业提交框"></textarea>
-          <button class = "confirmSay">提交作业</button>
-        </div>
+      <div class="most_bottom" v-else>
+        <textarea
+            v-model="submissionText"
+            class="homework_submission"
+            placeholder="请输入作业内容"></textarea>
+        <button class="confirmSay" @click="submitHomework">提交作业</button>
       </div>
     </div>
-    <div id = "comment_details" ref = "comment_details" style="display: none;">
-    <div class = "box">
-      <div class = "homework">
-        <img src="../assets/homework.png" alt="作业" style="width: 100px">
-        <div class = "homeworkContent">
-          <div class = "homeworkTitle">
-            {{homework.name}}
-          </div>
-          <div class = "homeworkType">
-            提交截止时间：
-            {{homework.deadline}} | 未截止 | {{homework.type}} 100分
-          </div>
-          <div class = "isCorrect">
-            <!--                {{homework.isCorrect}} {{homework.score}}-->
-          </div>
-        </div>
-      </div>
-    </div>
-      <div id = "content_container" ref = "content_container">
-        <div>
 
+    <div id="comment_details" ref="comment_details" style="display: none;">
+      <div class="box">
+        <div class="homework">
+          <img src="../assets/homework.png" alt="作业" style="width: 100px">
+          <div class="homeworkContent">
+            <div class="homeworkTitle">{{ homework.name }}</div>
+            <div class="homeworkType">
+              提交截止时间：{{ homework.deadline }} | {{ homework.type }} 100分
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="grade-panel">
+        <div class="grade-header">
+          <span>学生提交列表（{{ contents.length }}）</span>
+        </div>
+        <div v-if="contents.length === 0" class="empty-tip">暂无学生提交</div>
+        <div v-else class="submission-list">
+          <div
+              v-for="item in contents"
+              :key="item.account"
+              class="submission-item"
+              :class="{ active: selectedSubmission?.account === item.account }"
+              @click="selectSubmission(item)"
+          >
+            <div class="submission-account">{{ item.account }}</div>
+            <div class="submission-score">当前成绩：{{ item.score }} 分</div>
+          </div>
+        </div>
+        <div v-if="selectedSubmission" class="grade-form">
+          <div class="grade-label">提交内容</div>
+          <div class="grade-content">{{ selectedSubmission.details }}</div>
+          <div class="grade-row">
+            <label>评分（0~100）</label>
+            <input v-model.number="gradeScore" type="number" min="0" max="100" class="grade-input"/>
+            <button class="confirmSay" @click="saveGrade">保存批阅</button>
+          </div>
         </div>
       </div>
     </div>
-    <div ref = "details_container">
-    <div class = "details">
-      <img src="../assets/homeworkTitle.png" style="width: 55px">
-      <div id = "details">
-        <div style="font-weight: bold;font-size: large;margin-bottom: 15px">{{ homework.name }}</div>
-        <div class = "content">
-          <div class = "type">{{homework.type}} </div>
-          <div class = "type">截止时间： {{homework.deadline}} </div>
-          <div class = "score">100分 </div>
-          <div class = "score">查重 </div>
-          <div class = "score">允许超时交</div>
+
+    <div ref="details_container">
+      <div class="details">
+        <img src="../assets/homeworkTitle.png" style="width: 55px">
+        <div id="details">
+          <div style="font-weight: bold;font-size: large;margin-bottom: 15px">{{ homework.name }}</div>
+          <div class="content">
+            <div class="type">{{ homework.type }}</div>
+            <div class="type">截止时间： {{ homework.deadline }}</div>
+            <div class="score">100分</div>
+          </div>
+          <div style="margin-top: 10px;font-size: 15px">{{ homework.details }}</div>
         </div>
-        <div style="margin-top: 10px;font-size: 15px">{{homework.details}}</div>
       </div>
-    </div>
-    <div class = "say">
-  <img src="../assets/head.png" style="width: 40px;height:40px;border-radius: 20px;margin-top: 10px">
-      <textarea
-          id="bigInput"
-          class="large-textarea"
-          placeholder="说点什么吧"></textarea>
-    </div>
-    <div class = "bottom">
-      <button class = "confirmSay">发表评论</button>
-    </div><br>
-    <div class = "mostBottom">
-      <div style="line-height: 10px;display: flex">
-    <div style="font-size: 28px">全部评论</div>
-        <div style="margin-left: 10px;color: rgb(144, 147, 178)">共0条</div>
-        </div>
-      <img src="../assets/NoParam.png" style="width: 500px;margin-left: 430px;margin-top: 50px">
-    </div>
     </div>
   </div>
 </template>
@@ -262,7 +324,7 @@ loadContent();
   border-radius: 10px;
 }
 
-#details{
+#details {
   margin-top: 15px;
   margin-left: 15px;
   margin-bottom: 15px;
@@ -283,7 +345,7 @@ loadContent();
   margin-right: 10px;
 }
 
-.score{
+.score {
   height: 25px;
   padding: 5px;
   border-radius: 5px;
@@ -291,31 +353,6 @@ loadContent();
   color: rgb(144, 147, 178);
   line-height: 15px;
   margin-right: 10px;
-}
-
-.say {
-  background-color: #f8f9fa;
-  margin: 26px 0 0;
-  padding: 12px;
-  width: 100%;
-  border-bottom: 3px solid rgb(66, 133, 244);
-  display: flex;
-  height: 90px;
-}
-
-#bigInput {
-  border: none;
-  outline: none;
-  margin-left: 20px;
-  background-color: #f8f9fa;
-  width: 100%;
-  margin-top: 10px;
-}
-
-::placeholder {
-  color: #999;
-  font-size: large;
-  font-weight: bold;
 }
 
 .confirmSay {
@@ -328,29 +365,19 @@ loadContent();
   border-radius: 5px;
   cursor: pointer;
   font-size: 18px;
-  position: relative;
-  right: 0;
-}
-
-.bottom {
-  float: right;
-}
-
-.mostBottom{
-  margin-top: 50px;
 }
 
 .homework {
   display: flex;
 }
 
-.homeworkContent{
-  margin:6px 10px;
+.homeworkContent {
+  margin: 6px 10px;
 }
 
-.box{
+.box {
   width: 100%;
-  border-bottom: 1px solid  rgb(231, 235, 240);
+  border-bottom: 1px solid rgb(231, 235, 240);
 }
 
 .homeworkTitle {
@@ -359,12 +386,8 @@ loadContent();
 
 .homeworkType {
   font-size: small;
-  margin:4px 0;
+  margin: 4px 0;
   color: rgb(95, 99, 104);
-}
-
-#homeworks_container {
-  display: none;
 }
 
 .bottom_container {
@@ -375,24 +398,107 @@ loadContent();
 .bottom_box {
   padding: 24px;
   background-color: #f8f9fa;
-  height: 167px;
+  min-height: 120px;
   margin-top: 23px;
   border-radius: 10px;
   border: 1px solid rgb(204, 204, 204);
 }
 
-.most_bottom{
+.most_bottom {
   padding: 24px;
-  height: 200px;
+  min-height: 200px;
   margin-top: 23px;
   border-radius: 10px;
   border: 1px solid rgb(204, 204, 204);
 }
 
-#homework_submission{
+.homework_submission {
   border: none;
   outline: none;
   width: 100%;
-  height: 80px;
+  height: 120px;
+  resize: vertical;
+}
+
+.grade-panel {
+  margin-top: 24px;
+  padding: 24px;
+  border: 1px solid rgb(204, 204, 204);
+  border-radius: 10px;
+  background: #f8f9fa;
+}
+
+.grade-header {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.empty-tip {
+  color: rgb(144, 147, 178);
+  padding: 24px 0;
+}
+
+.submission-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.submission-item {
+  padding: 12px 16px;
+  background: #fff;
+  border: 1px solid rgb(218, 220, 224);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.submission-item.active {
+  border-color: rgb(66, 133, 244);
+  background: rgb(236, 243, 254);
+}
+
+.submission-account {
+  font-weight: 600;
+}
+
+.submission-score {
+  font-size: 14px;
+  color: rgb(95, 99, 104);
+  margin-top: 4px;
+}
+
+.grade-form {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid rgb(218, 220, 224);
+}
+
+.grade-label {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.grade-content {
+  padding: 12px;
+  background: #fff;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  min-height: 80px;
+}
+
+.grade-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.grade-input {
+  width: 100px;
+  height: 36px;
+  padding: 0 8px;
+  border: 1px solid rgb(218, 220, 224);
+  border-radius: 6px;
 }
 </style>

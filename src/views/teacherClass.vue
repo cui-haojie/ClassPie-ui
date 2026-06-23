@@ -18,15 +18,16 @@ import {useRouter} from "vue-router";
           我协助的
         </div>
       </div>
-      <div style="width: 840px"></div>
       <div class="right">
         <button class="manage">归档管理</button>
-        <input class='search' type="text" placeholder="搜索我学的课程">
-        <i class="iconfont icon-sousuo_sousuo" style="position: absolute;top:191px;right: 220px"></i>
+        <div class="search-wrapper">
+          <input class='search' type="text" placeholder="搜索我学的课程">
+          <i class="iconfont icon-sousuo_sousuo search-icon"></i>
+        </div>
       </div>
     </div>
     <div class="bottom">
-      <div>
+      <div class="bottom-header">
         <div class="bt_left">
           2024-2025 第一学期
         </div>
@@ -41,18 +42,18 @@ import {useRouter} from "vue-router";
 <style scoped>
 .Top {
   display: flex;
+  justify-content: space-between;
+  align-items: center;
   border: 1px solid rgb(218, 220, 224);
-  width: 1500px;
+  width: 100%;
+  max-width: 1500px;
   border-radius: 10px;
   z-index: 1;
-
   padding: 18px;
-  margin: 100px auto auto;
+  margin: 20px auto auto;
 }
 
 .join {
-  position: relative;
-  right: -1216px;
   border: none;
   background-color: rgb(72, 138, 248);
   color: white;
@@ -71,34 +72,54 @@ h2 {
 }
 
 .main {
-  width: 1500px;
+  width: 100%;
+  max-width: 1500px;
   margin: auto;
   flex-direction: column;
   display: flex;
+  padding: 0 16px;
+  box-sizing: border-box;
 }
 
 .mid {
   display: flex;
-  width: 1500px;
-  height: 100px;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 100px;
   padding: 8px 0 12px 0;
+  flex-wrap: wrap;
+  gap: 16px;
 }
 
 .mine {
   display: flex;
-  width: 220px;
   height: 70px;
 }
 
 .right {
-  width: 440px;
-  height: 100px;
-  line-height: 100px;
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.search-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.search-icon {
+  position: absolute;
+  right: 12px;
+  cursor: pointer;
+  pointer-events: none;
 }
 
 .manage {
   background-color: #FFFFFF;
-  margin-left: 12px;
   height: 46px;
   width: 127px;
   border-radius: 5px;
@@ -117,12 +138,9 @@ h2 {
 .search {
   width: 267px;
   height: 46px;
-  margin-left: 32px;
   border: 1px solid rgb(218, 220, 224);
   border-radius: 23px;
-  position: relative;
-  top: -3px;
-  padding: 4px 30px 0 15px;
+  padding: 4px 36px 0 15px;
 }
 
 input::placeholder {
@@ -136,14 +154,9 @@ input:focus {
   border-width: 1px;
 }
 
-.icon-sousuo_sousuo {
-  cursor: pointer;
-}
-
 .bottom {
-  display: flex;
   background-color: rgb(248, 249, 250);
-  width: 1500px;
+  width: 100%;
   border: 1px solid rgb(218, 220, 224);
   padding: 12px;
   margin-bottom: 24px;
@@ -151,14 +164,17 @@ input:focus {
   border-radius: 7px;
 }
 
+.bottom-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 .bt_left {
   font-size: 22px;
 }
 
 .bt_right {
-  position: absolute;
-  left: 1640px;
-  top: 310px;
   font-size: 20px;
   color: rgb(72, 138, 248);
   cursor: pointer;

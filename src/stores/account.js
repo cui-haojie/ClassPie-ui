@@ -8,6 +8,9 @@ export const useAccountStore = defineStore('account', {
         setAccount(account) {
             this.account = account
         },
+        logout() {
+            this.account = null
+        },
     },
     persist: true,
 })

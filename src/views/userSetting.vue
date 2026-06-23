@@ -1,15 +1,16 @@
 <script setup lang="js" name="UserSettingsPage">
-import {ElTabs, ElTabPane} from "element-plus";
 import {useAccountStore} from "@/stores/account.js";
 import {storeToRefs} from "pinia";
 import {ref} from "vue";
 import request from "@/utils/request.js";
+import {useRouter} from "vue-router";
 
 const activeName = ref('first');
 
 const accountStore = useAccountStore();
 const {account} = storeToRefs(accountStore);
-console.log(account.value)
+const router = useRouter();
+
 const account_1 = ref('')
 const name = ref('')
 const password = ref('')
@@ -19,32 +20,115 @@ const email_or_phone = ref('')
 const status_number = ref('')
 
 function update() {
+  if (!account.value) {
+    alert('请先登录')
+    return
+  }
   request.post("/editor/account", {account: account.value})
       .then((res) => {
-        const data = res;
-        console.log(res)
-        const {
-          account: resAccount,
-          name: resName,
-          status: resStatus,
-          password: resPassword,
-          mechanism: resMechanism,
-          email_or_phone: resEmailOrPhone,
-          status_number: resStatusNumber
-        } = data;
-
-        account_1.value = resAccount;
-        name.value = resName;
-        status.value = resStatus;
-        password.value = resPassword;
-        mechanism.value = resMechanism;
-        email_or_phone.value = resEmailOrPhone;
-        status_number.value = resStatusNumber;
+        if (!res?.account) {
+          alert('获取账户信息失败')
+          return
+        }
+        account_1.value = res.account
+        name.value = res.name || ''
+        status.value = res.status || ''
+        password.value = res.password ? '********' : ''
+        mechanism.value = res.mechanism || ''
+        email_or_phone.value = res.email_or_phone || ''
+        status_number.value = res.status_number || ''
       })
       .catch(error => {
-        console.error(error);
-        alert(error.message || "请求失败");
-      });
+        console.error(error)
+        alert(error.message || "请求失败")
+      })
+}
+
+function saveField(field, label, currentValue) {
+  const value = prompt(`请输入新的${label}`, currentValue || '')
+  if (value === null) return
+  if (!value.trim()) {
+    alert(`${label}不能为空`)
+    return
+  }
+  const payload = {account: account.value}
+  payload[field] = value.trim()
+  request.put('/editor/updateAccount', payload)
+      .then((ok) => {
+        if (ok) {
+          alert('修改成功')
+          update()
+        } else {
+          alert('修改失败，请确认后端已重启')
+        }
+      })
+      .catch((err) => {
+        console.error(err)
+        alert('修改失败，请检查后端是否运行')
+      })
+}
+
+function editName() {
+  saveField('name', '姓名', name.value)
+}
+
+function editMechanism() {
+  saveField('mechanism', '学校', mechanism.value)
+}
+
+function editStatusNumber() {
+  saveField('status_number', '学号', status_number.value)
+}
+
+function editPhone() {
+  saveField('email_or_phone', '手机号', email_or_phone.value)
+}
+
+function editStatus() {
+  const pickStudent = confirm('点击「确定」设为学生，点击「取消」设为老师')
+  const newStatus = pickStudent ? '学生' : '老师'
+  request.put('/editor/updateAccount', {account: account.value, status: newStatus})
+      .then((ok) => {
+        if (ok) {
+          alert(`已设置为${newStatus}`)
+          update()
+        } else {
+          alert('修改失败')
+        }
+      })
+      .catch((err) => {
+        console.error(err)
+        alert('修改失败')
+      })
+}
+
+function changePassword() {
+  const value = prompt('请输入新密码（8~16位）')
+  if (value === null) return
+  if (value.length < 8 || value.length > 16) {
+    alert('密码长度必须在8~16位之间')
+    return
+  }
+  request.put('/editor/change', {account: account.value, password: value.trim()})
+      .then((ok) => {
+        if (ok) {
+          alert('密码修改成功，请重新登录')
+          accountStore.logout()
+          router.push({ name: 'login' })
+        } else {
+          alert('密码修改失败')
+        }
+      })
+      .catch((err) => {
+        console.error(err)
+        alert('密码修改失败')
+      })
+}
+
+function maskPhone(phone) {
+  if (!phone || phone === 'yes') return '未绑定'
+  if (phone.length <= 4) return phone
+  return phone.slice(0, 3) + '****' + phone.slice(-4)
 }
 
 update()
@@ -56,82 +140,83 @@ update()
       <div class="us-header">
         <img src="@/assets/head.png" class="us-avatar"/>
         <div class="us-info">
-          <h2 class="us-username">{{ name }}</h2>
+          <h2 class="us-username">{{ name || account_1 }}</h2>
           <button class="us-vip-btn">开通课堂派VIP</button>
         </div>
       </div>
 
       <div class="us-tabs-container">
-        <el-tabs
-            v-model="activeName"
-            class="us-tabs"
-            stretch
-        >
-          <el-tab-pane label="账户信息" name="first"/>
-          <el-tab-pane label="通知设置" name="second"/>
-        </el-tabs>
+        <div class="us-tabs">
+          <button
+              type="button"
+              class="us-tab"
+              :class="{ active: activeName === 'first' }"
+              @click="activeName = 'first'"
+          >账户信息</button>
+          <button
+              type="button"
+              class="us-tab"
+              :class="{ active: activeName === 'second' }"
+              @click="activeName = 'second'"
+          >通知设置</button>
+        </div>
       </div>
-      <div class="account">
+
+      <div class="account" v-show="activeName === 'first'">
         <h2 class="set_name" style="padding: 24px 0">账号设置</h2>
         <ul class="accountReal">
-          <li style="border-top-right-radius: 5px"><label>账号</label><span class="content">{{ account_1 }}</span>
-            <p></p></li>
-          <li><label>所属角色</label><span class="content">{{ status }}</span>
-            <p class="right"><span>去设置</span></p></li>
-          <li><label>手机号</label><span class="content">***********</span>
-            <p class="right"><span>更换手机号</span><span> | </span><span>解绑</span></p></li>
-          <li style="border-bottom-right-radius: 5px"><label>密码</label><span class="content"
-                                                                               id="password">{{ password }}</span>
-            <p class="right"><span id="changePassword" @click="changePassword">修改密码</span></p></li>
+          <li style="border-top-right-radius: 5px">
+            <label>账号</label><span class="content">{{ account_1 }}</span>
+          </li>
+          <li>
+            <label>所属角色</label><span class="content">{{ status }}</span>
+            <p class="right"><span @click="editStatus">去设置</span></p>
+          </li>
+          <li>
+            <label>手机号</label><span class="content">{{ maskPhone(email_or_phone) }}</span>
+            <p class="right"><span @click="editPhone">更换手机号</span></p>
+          </li>
+          <li style="border-bottom-right-radius: 5px">
+            <label>密码</label><span class="content">{{ password }}</span>
+            <p class="right"><span @click="changePassword">修改密码</span></p>
+          </li>
         </ul>
         <h2 class="set_name" style="padding: 24px 0">基础信息</h2>
         <ul class="accountReal">
-          <li style="border-top-right-radius: 5px"><label>姓名</label><span class="content">{{ name }}</span>
-            <p></p></li>
-          <li><label>学号</label><span class="content">123456789</span>
-            <p></p></li>
-          <li><label>学校</label><span class="content">{{ mechanism }}</span>
-            <p></p></li>
-          <li><label>院系</label><span style="color: rgb(95, 99, 148)"><i
-              class="iconfont icon-gantanhao"/> 未完善</span>
-            <p></p></li>
-          <li><label>专业</label><span style="color: rgb(95, 99, 148)"><i
-              class="iconfont icon-gantanhao"/> 未完善</span>
-            <p></p></li>
-          <li><label>班级</label><span style="color: rgb(95, 99, 148)"><i
-              class="iconfont icon-gantanhao"/> 未完善</span>
-            <p></p></li>
-          <li><label>年级</label><span style="color: rgb(95, 99, 148)"><i
-              class="iconfont icon-gantanhao"/> 未完善</span>
-            <p></p></li>
-          <li style="border-bottom-right-radius: 5px"><label>入学时间</label><span style="color: rgb(95, 99, 148)"><i
-              class="iconfont icon-gantanhao"/> 未完善</span>
-            <p></p></li>
+          <li style="border-top-right-radius: 5px">
+            <label>姓名</label><span class="content">{{ name || '未完善' }}</span>
+            <p class="right"><span @click="editName">编辑</span></p>
+          </li>
+          <li>
+            <label>学号</label>
+            <span class="content" v-if="status_number">{{ status_number }}</span>
+            <span class="hint" v-else>未完善</span>
+            <p class="right"><span @click="editStatusNumber">编辑</span></p>
+          </li>
+          <li style="border-bottom-right-radius: 5px">
+            <label>学校</label>
+            <span class="content" v-if="mechanism">{{ mechanism }}</span>
+            <span class="hint" v-else>未完善</span>
+            <p class="right"><span @click="editMechanism">编辑</span></p>
+          </li>
         </ul>
-        <h2 class="set_name" style="padding: 24px 0">第三方账号绑定</h2>
-        <ul class="accountReal">
-          <li style="border-top-right-radius: 5px"><label>邮箱绑定</label><span style="color: rgb(95, 99, 148)"><i
-              class="iconfont icon-gantanhao"/> 未完善</span>
-            <p class="right"><span>立即绑定</span></p></li>
-          <li style="border-bottom-right-radius: 5px"><label>微信绑定</label><span style="color: rgb(95, 99, 148)"><i
-              class="iconfont icon-gantanhao"/> 未完善</span>
-            <p class="right"><span>立即绑定</span></p></li>
-        </ul>
+      </div>
+
+      <div class="account" v-show="activeName === 'second'">
+        <p class="hint" style="padding: 24px 0">通知设置功能暂未开放</p>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* 最外层隔离容器 */
 .user-settings-page {
   --us-primary: #409EFF;
   --us-text: #303133;
   --us-bg: #f8f9fa;
-  isolation: isolate; /* 关键：创建新的堆叠上下文 */
-  height: auto;
+  isolation: isolate;
   min-height: 100vh;
-  overflow-y: hidden;
+  padding-bottom: 40px;
 }
 
 .us-container {
@@ -157,7 +242,6 @@ update()
   height: 114px;
   border-radius: 57px;
   margin-right: 20px;
-
 }
 
 .us-info {
@@ -185,44 +269,41 @@ update()
 .us-tabs-container {
   position: relative;
   z-index: 10;
-
 }
 
-.us-tabs :deep(.el-tabs__header) {
-  margin: 0;
-}
-
-.us-tabs :deep(.el-tabs__nav) {
+.us-tabs {
   display: flex;
-  border: none !important;
+  gap: 8px;
+  border-bottom: 1px solid rgb(218, 220, 224);
 }
 
-.us-tabs :deep(.el-tabs__item) {
+.us-tab {
   font: 500 22px/52px "PingFang SC", sans-serif;
   padding: 0 20px;
   height: 52px;
   color: var(--us-text);
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
 }
 
-.us-tabs :deep(.el-tabs__item.is-active),
-.us-tabs :deep(.el-tabs__item:hover) {
+.us-tab.active,
+.us-tab:hover {
   color: var(--us-primary);
 }
 
-.us-tabs :deep(.el-tabs__active-bar) {
-  height: 3px;
-  background: var(--us-primary);
-  transition: all 0.3s ease;
+.us-tab.active {
+  border-bottom-color: var(--us-primary);
 }
 
 .account {
-  width: 1100px;
+  width: 100%;
+  max-width: 1100px;
   background-color: rgb(248, 249, 250);
   margin-top: 16px;
   padding: 0 30px 30px;
-  height: 1200px;
   border-radius: 7px;
-  overflow: hidden;
 }
 
 .set_name {
@@ -245,6 +326,7 @@ li {
   margin: 0 0 -1px 4px;
   border-left: none !important;
   display: flex;
+  position: relative;
 }
 
 label {
@@ -264,6 +346,9 @@ label {
 
 .content {
   color: rgb(95, 99, 148);
+}
 
+.hint {
+  color: rgb(95, 99, 148);
 }
 </style>

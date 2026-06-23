@@ -72,39 +72,43 @@ function validateAccount(account) {
 </script>
 
 <template>
-  <img src="../assets/classPai.png" alt="商标" class="paintingImg">
-  <img src="../assets/bg.png" alt="背景" class="bg">
-  <div class="register_container">
-    <h1>注册账号</h1>
-    <input type="text" placeholder="请输入邮箱/手机号/账号" class="input" style="margin-top: 25px"
-           id="input_account"><br>
-    <span class="error-message">格式不正确</span><br>
-    <input type="text" placeholder="请输入密码" class="input" id="input_password"><br>
-    <span class="error-message"></span><br>
-    <input type="text" placeholder="请确认输入密码" class="input" id="password_2"><br>
-    <span class="error-message">两次输入密码不一致</span><br>
-    <h2 style="font-weight: 450;font-size: 22px">选择身份</h2>
-    <div class="form">
-      <button id='teacher' class="status" @click="changeTeacher"><img src="../assets/teacher.png" class="teacher">老师
-      </button>
-      <button id='student' class="status" @click="changeStudent"><img src="../assets/student.png" class="student">学生
-      </button>
+  <div class="auth-page">
+    <div class="auth-left">
+      <img src="../assets/classPai.png" alt="商标" class="paintingImg">
+      <img src="../assets/bg.png" alt="背景" class="bg">
     </div>
-    <input type="text" placeholder="请输入姓名" class="input" style="margin-top: 25px" id="input_name"><br>
-    <span class="error-message"></span><br>
-    <input type="text" placeholder="请输入学校/机构" class="input" id="input_mechanism"><br>
+    <div class="register_container">
+      <h1>注册账号</h1>
+      <input type="text" placeholder="请输入邮箱/手机号/账号" class="input" style="margin-top: 25px"
+             id="input_account"><br>
+      <span class="error-message">格式不正确</span><br>
+      <input type="text" placeholder="请输入密码" class="input" id="input_password"><br>
+      <span class="error-message"></span><br>
+      <input type="text" placeholder="请确认输入密码" class="input" id="password_2"><br>
+      <span class="error-message">两次输入密码不一致</span><br>
+      <h2 style="font-weight: 450;font-size: 22px">选择身份</h2>
+      <div class="form">
+        <button id='teacher' class="status" @click="changeTeacher"><img src="../assets/teacher.png" class="teacher">老师
+        </button>
+        <button id='student' class="status" @click="changeStudent"><img src="../assets/student.png" class="student">学生
+        </button>
+      </div>
+      <input type="text" placeholder="请输入姓名" class="input" style="margin-top: 25px" id="input_name"><br>
+      <span class="error-message"></span><br>
+      <input type="text" placeholder="请输入学校/机构" class="input" id="input_mechanism"><br>
 
-    <div id="studentId">
-      <input type="text" placeholder="请输入学号" class="input" id="input_status_number"><br>
-    </div>
-    <br>
-    <input type="text" placeholder="请输入计算结果" class="input" style="width: 280px" id="input_test">
-    <img src="../assets/check.png" style="position: absolute;right: 37px;height: 60px"><br>
-    <span class="error-message">验证失败</span><br>
+      <div id="studentId">
+        <input type="text" placeholder="请输入学号" class="input" id="input_status_number"><br>
+      </div>
+      <br>
+      <div class="captcha-row">
+        <input type="text" placeholder="请输入计算结果" class="input captcha-input" id="input_test">
+        <img src="../assets/check.png" class="captcha-img" alt="验证码">
+      </div>
+      <span class="error-message">验证失败</span><br>
 
-    <button class="register" @click="create">注册</button>
-    <div style="display: flex;right:-350px;position: relative;margin-bottom: 20px">
-      <div style="font-size: 18px;right: 40px">已有账号?
+      <button class="register" @click="create">注册</button>
+      <div class="login-link">已有账号?
         <span @click="router.push({name : 'login'})" style="color: rgb(72, 138, 248);cursor: pointer">去登陆</span>
       </div>
     </div>
@@ -113,26 +117,46 @@ function validateAccount(account) {
 </template>
 
 <style scoped>
+.auth-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 48px;
+  min-height: 100vh;
+  padding: 40px 24px;
+  background-color: rgb(248, 249, 250);
+}
+
+.auth-left {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 1;
+  max-width: 640px;
+  min-width: 0;
+}
+
 .paintingImg {
-  left: 78px;
-  position: absolute;
-  top: 55px;
+  margin-bottom: 24px;
+  max-width: 100%;
+  height: auto;
 }
 
 .bg {
-  left: 227px;
-  position: relative;
-  top: 140px;
-  height: 700px;
+  max-width: 100%;
+  height: auto;
+  max-height: 560px;
+  object-fit: contain;
 }
 
 .register_container {
-  left: 1125px;
-  position: fixed;
-  top: 15px;
+  position: relative;
   background-color: rgb(255, 255, 255);
   width: 560px;
-  padding: 0 35px;
+  max-width: 100%;
+  padding: 0 35px 24px;
+  box-shadow: 0 5px 20px rgba(0, 0, 0, .1);
+  flex-shrink: 0;
 }
 
 h1 {
@@ -151,12 +175,12 @@ h1 {
   padding: 0;
   letter-spacing: 1px;
   font-weight: 360;
-  transform: translateX(-50%);
 }
 
 .input {
   height: 60px;
-  width: 490px;
+  width: 100%;
+  max-width: 490px;
   padding: 4px 15px;
   margin-bottom: 0;
   margin-top: 0;
@@ -214,7 +238,8 @@ input:focus {
 button.register {
   background-color: rgb(72, 138, 248);
   height: 63px;
-  width: 490px;
+  width: 100%;
+  max-width: 490px;
   padding: 4px 20px;
   border-radius: 5px;
   border: none;
@@ -224,6 +249,29 @@ button.register {
   color: white;
   cursor: pointer;
   text-align: center;
+}
+
+.captcha-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 490px;
+}
+
+.captcha-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.captcha-img {
+  height: 60px;
+  flex-shrink: 0;
+}
+
+.login-link {
+  font-size: 18px;
+  text-align: right;
+  margin-bottom: 20px;
 }
 
 </style>

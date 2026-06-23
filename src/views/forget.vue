@@ -57,52 +57,61 @@ function confirmPassword() {
 </script>
 
 <template>
-  <img src="../assets/classPai.png" alt="商标" class="paintingImg">
-  <div class="forget_container" id="forget">
-    <h1 style="letter-spacing: 2px;margin-bottom: 20px">忘记密码</h1>
-    <input type="text" placeholder="请输入邮箱/手机号" class="input" style="margin-top: 25px" id="account"><br>
-    <span class="error-message">格式错误</span><br>
-    <button class="forget" id="next" @click="next">下一步</button>
-    <br>
-
-    <div style="display: flex">
-      <div style="width: 305px"></div>
-      <span>又想起来了?
-      <span @click="router.push({name : 'login'})" style="color: rgb(72, 138, 248);cursor: pointer">
-      那就登陆</span></span></div>
-  </div>
-  <div class="forget_container" id="confirm">
-    <h1 style="letter-spacing: 2px;margin-bottom: 20px">修改密码</h1>
-    <input type="text" placeholder="请输入新密码" class="input" style="margin-top: 25px" id="newPassword"><br>
-    <span class="error-message">格式错误</span><br>
-    <button class="forget" id="ok" @click="confirmPassword">确认</button>
-    <br>
-
-    <div style="display: flex">
-      <div style="width: 305px"></div>
-      <span>又想起来了?
-      <span @click="router.push({name : 'login'})" style="color: rgb(72, 138, 248);cursor: pointer">
-      那就登陆</span></span></div>
+  <div class="auth-page">
+    <img src="../assets/classPai.png" alt="商标" class="paintingImg">
+    <div class="forget_container" id="forget">
+      <h1 style="letter-spacing: 2px;margin-bottom: 20px">忘记密码</h1>
+      <input type="text" placeholder="请输入邮箱/手机号" class="input" style="margin-top: 25px" id="account"><br>
+      <span class="error-message">格式错误</span><br>
+      <button class="forget" id="next" @click="next">下一步</button>
+      <br>
+      <div class="login-link">
+        又想起来了?
+        <span @click="router.push({name : 'login'})" style="color: rgb(72, 138, 248);cursor: pointer">
+          那就登陆</span>
+      </div>
+    </div>
+    <div class="forget_container" id="confirm">
+      <h1 style="letter-spacing: 2px;margin-bottom: 20px">修改密码</h1>
+      <input type="text" placeholder="请输入新密码" class="input" style="margin-top: 25px" id="newPassword"><br>
+      <span class="error-message">格式错误</span><br>
+      <button class="forget" id="ok" @click="confirmPassword">确认</button>
+      <br>
+      <div class="login-link">
+        又想起来了?
+        <span @click="router.push({name : 'login'})" style="color: rgb(72, 138, 248);cursor: pointer">
+          那就登陆</span>
+      </div>
+    </div>
   </div>
   <RouterView :key="route.fullPath"/>
 </template>
 
 <style scoped>
+.auth-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  min-height: 100vh;
+  padding: 40px 24px;
+  background-color: rgb(248, 249, 250);
+}
+
 .paintingImg {
-  left: 78px;
-  position: absolute;
-  top: 55px;
+  max-width: 200px;
+  height: auto;
 }
 
 .forget_container {
   width: 560px;
-  height: 281px;
+  max-width: 100%;
   background-color: rgb(255, 255, 255);
-  top: 340px;
-  left: 675px;
-  padding: 0 40px;
-  position: fixed;
+  padding: 24px 40px 32px;
+  position: relative;
   box-shadow: 0 5px 20px rgba(0, 0, 0, .1);
+  border-radius: 7px;
 }
 
 h1 {
@@ -120,7 +129,7 @@ input:focus {
 
 .input {
   height: 60px;
-  width: 480px;
+  width: 100%;
   padding: 4px 15px;
   margin-bottom: 0;
   border: 1px solid rgb(218, 220, 224);
@@ -137,7 +146,7 @@ input::placeholder {
 button.forget {
   background-color: rgb(72, 138, 248);
   height: 63px;
-  width: 480px;
+  width: 100%;
   padding: 4px 20px;
   border-radius: 5px;
   border: none;
@@ -164,9 +173,13 @@ span {
   color: transparent;
   transition: color 0.3s;
   padding: 0;
-  left: 0 !important;
   letter-spacing: 1px;
   font-weight: 360;
+}
+
+.login-link {
+  font-size: 18px;
+  text-align: right;
 }
 
 #confirm {
