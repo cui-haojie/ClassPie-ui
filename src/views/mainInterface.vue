@@ -427,6 +427,7 @@ function confirmClass() {
           toast.success("课程添加成功")
           console.log(res)
           loadCourse();
+          kill();
         } else {
           toast.error("课程码失效或该课程不存在")
         }
@@ -465,11 +466,14 @@ function CreateClass() {
   })
 }
 
-function toTop(index) {
+function toTop(courseId) {
+  const index = courses.value.findIndex(course => course.id === courseId);
+  if (index === -1) return;
   courses.value[index].is_pinned = !courses.value[index].is_pinned;
   request.post("/editor/updatePinStatus", {
-    id: courses.value[index].id,
-    is_pinned: courses.value[index].is_pinned
+    id: courseId,
+    is_pinned: courses.value[index].is_pinned,
+    account: account.value
   }).catch(error => {
     console.error("更新置顶状态失败:", error)
     courses.value[index].is_pinned = !courses.value[index].is_pinned;
@@ -486,7 +490,8 @@ function toBottom(courseId) {
   courses.value[index].is_pinned = false;
   request.post("/editor/updatePinStatus", {
     id: courseId,
-    is_pinned: false
+    is_pinned: false,
+    account: account.value
   }).catch(error => {
     console.error("取消置顶失败:", error);
     courses.value[index].is_pinned = true;
@@ -741,7 +746,7 @@ function restoreCourse(courseId) {
               <span class="action-link" @click.stop="toBottom(course.id)">
                 {{ course.is_pinned ? '取消置顶' : '置顶' }}
               </span>
-              <span class="action-link" @click.stop="archiveCourse(course.id)">归档</span>
+              <span v-if="isTeachingCourse(course)" class="action-link" @click.stop="archiveCourse(course.id)">归档</span>
               <span class="action-link muted" @click.stop="deleteCourse(course.id)">退课</span>
             </div>
           </div>
@@ -769,7 +774,7 @@ function restoreCourse(courseId) {
         </div>
       </div>
       <div class="right">
-        <button class="manage" @click="openArchiveModal">归档管理</button>
+        <button v-if="status === '老师'" class="manage" @click="openArchiveModal">归档管理</button>
         <div class="search-wrapper">
           <input class='search' type="text" placeholder="搜索我学的课程" v-model="searchKeyword" @input="handleSearch">
           <i class="iconfont icon-sousuo_sousuo search-icon"></i>
@@ -817,12 +822,12 @@ function restoreCourse(courseId) {
               <span class="teacher-label">负责人: {{ course.teacherName }}</span>
             </div>
             <div class="course-card-footer-actions">
-              <span class="action-link" @click.stop="toTop(index)">
-                {{ course.is_pinned ? '取消置顶' : '置顶' }}
-              </span>
-              <span class="action-link" @click.stop="archiveCourse(course.id)">归档</span>
-              <span class="action-link muted" @click.stop="deleteCourse(course.id)">退课</span>
-            </div>
+            <span class="action-link" @click.stop="toTop(course.id)">
+              {{ course.is_pinned ? '取消置顶' : '置顶' }}
+            </span>
+            <span v-if="isTeachingCourse(course)" class="action-link" @click.stop="archiveCourse(course.id)">归档</span>
+            <span class="action-link muted" @click.stop="deleteCourse(course.id)">退课</span>
+          </div>
           </div>
         </div>
       </div>
