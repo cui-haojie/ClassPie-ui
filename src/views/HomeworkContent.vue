@@ -5,19 +5,17 @@ import request from "@/utils/request.js";
 import {useAccountStore} from "@/stores/account.js";
 import {storeToRefs} from "pinia";
 import {toast} from '@/utils/toast.js';
+import {resolveAttachmentUrl} from '@/utils/avatar.js';
+import {formatDeadline, homeworkStatusLabel, isHomeworkOverdue} from '@/utils/homeworkDeadline.js';
+import UserAvatar from '@/components/UserAvatar.vue';
 
 const route = useRoute();
 const accountStore = useAccountStore();
 const {account} = storeToRefs(accountStore);
 const classId = ref(Number(route.query.classId || 0));
 
-const studentTitle = ref(null);
-const teacherTitle = ref(null);
-const details_container = ref(null);
-const homeworks = ref(null);
-const comment_details = ref(null);
-
 const status = ref("");
+const activeView = ref('details');
 const homework_id = ref(Number(route.params.id));
 const homework = ref({
   homework_id: homework_id.value,
@@ -35,23 +33,24 @@ const selectedSubmission = ref(null);
 const gradeScore = ref(0);
 const submissionText = ref('');
 const mySubmission = ref(null);
+const attachmentFile = ref(null);
+const attachmentInputRef = ref(null);
+const memberProfiles = ref({});
 
 const homeworkContentId = computed(() => {
   const cid = homework.value?.content_id;
   return cid && cid > 0 ? Number(cid) : homework_id.value;
 });
 
+const isOverdue = computed(() => isHomeworkOverdue(homework.value?.deadline));
+const deadlineText = computed(() => formatDeadline(homework.value?.deadline));
+const statusLabel = computed(() => homeworkStatusLabel(homework.value?.deadline));
+
 function checkStatus() {
   request.post("/editor/getAccountStatus", {account: account.value})
       .then((res) => {
         status.value = res;
-        if (status.value === "老师") {
-          teacherTitle.value.style.display = "flex";
-          studentTitle.value.style.display = "none";
-        } else {
-          teacherTitle.value.style.display = "none";
-          studentTitle.value.style.display = "flex";
-        }
+        activeView.value = 'details';
       })
 }
 
@@ -72,11 +71,32 @@ function loadContent() {
         if (mySubmission.value) {
           submissionText.value = mySubmission.value.details || '';
         }
+        loadMemberProfiles(contents.value.map(item => item.account));
       })
 }
 
+function loadMemberProfiles(accounts) {
+  const unique = [...new Set(accounts.filter(Boolean))];
+  unique.forEach(acc => {
+    if (memberProfiles.value[acc]) return;
+    request.post('/editor/account', { account: acc })
+        .then(res => {
+          if (res?.account) {
+            memberProfiles.value = {
+              ...memberProfiles.value,
+              [acc]: {
+                name: res.name,
+                avatar_url: res.avatar_url,
+              },
+            };
+          }
+        })
+        .catch(() => {});
+  });
+}
+
 function initPage() {
-  loadHomework()
+  return loadHomework()
       .then(() => loadContent())
       .catch(error => {
         console.error(error);
@@ -84,29 +104,63 @@ function initPage() {
       });
 }
 
+function resetHomeworkState() {
+  activeView.value = 'details';
+  submissionText.value = '';
+  mySubmission.value = null;
+  clearAttachment();
+  selectedSubmission.value = null;
+  gradeScore.value = 0;
+  contents.value = [];
+  memberProfiles.value = {};
+  homework.value = {
+    homework_id: homework_id.value,
+    name: '',
+    type: '',
+    deadline: '',
+    isCorrect: false,
+    score: 0,
+    content_id: 0,
+    details: '',
+  };
+}
+
+function syncFromRoute() {
+  homework_id.value = Number(route.params.id);
+  classId.value = Number(route.query.classId || 0);
+}
+
+syncFromRoute();
 checkStatus();
 initPage();
+
+watch(
+    () => [route.params.id, route.query.classId],
+    ([newId, newClassId], [oldId, oldClassId]) => {
+      if (String(newId) === String(oldId) && String(newClassId) === String(oldClassId)) {
+        return;
+      }
+      syncFromRoute();
+      resetHomeworkState();
+      checkStatus();
+      initPage();
+    }
+);
 
 watch(homeworkContentId, () => {
   loadContent();
 });
 
-function submit() {
-  details_container.value.style.display = "none";
-  comment_details.value.style.display = "none";
-  homeworks.value.style.display = "block";
+function showDetails() {
+  activeView.value = 'details';
 }
 
-function showDetails() {
-  details_container.value.style.display = "block";
-  homeworks.value.style.display = "none";
-  comment_details.value.style.display = "none";
+function submit() {
+  activeView.value = 'submit';
 }
 
 function comment() {
-  comment_details.value.style.display = "block";
-  details_container.value.style.display = "none";
-  homeworks.value.style.display = "none";
+  activeView.value = 'grade';
   if (contents.value.length > 0 && !selectedSubmission.value) {
     selectSubmission(contents.value[0]);
   }
@@ -121,27 +175,51 @@ function selectSubmission(item) {
   gradeScore.value = item.score ?? 0;
 }
 
+function pickAttachment() {
+  attachmentInputRef.value?.click();
+}
+
+function onAttachmentChange(event) {
+  const file = event.target.files?.[0];
+  attachmentFile.value = file || null;
+}
+
+function clearAttachment() {
+  attachmentFile.value = null;
+  if (attachmentInputRef.value) {
+    attachmentInputRef.value.value = '';
+  }
+}
+
 function submitHomework() {
+  if (isOverdue.value) {
+    toast.warning('作业已截止，无法提交');
+    return;
+  }
   const text = submissionText.value.trim();
-  if (!text) {
-    toast.warning('请先填写作业内容');
+  if (!text && !attachmentFile.value) {
+    toast.warning('请填写作业内容或上传附件');
     return;
   }
   if (mySubmission.value) {
     toast.warning('您已提交过该作业');
     return;
   }
-  request.post("/editor/addContent", {
-    content_id: homeworkContentId.value,
-    account: account.value,
-    score: 0,
-    details: text,
-  }).then((ok) => {
+  const formData = new FormData();
+  formData.append('content_id', String(homeworkContentId.value));
+  formData.append('account', account.value);
+  formData.append('details', text);
+  if (attachmentFile.value) {
+    formData.append('file', attachmentFile.value);
+  }
+  request.post('/editor/submitHomework', formData).then((ok) => {
     if (ok) {
       toast.success('作业提交成功');
+      clearAttachment();
       loadContent();
+      activeView.value = 'submit';
     } else {
-      toast.error('提交失败');
+      toast.error(isOverdue.value ? '作业已截止，无法提交' : '提交失败');
     }
   }).catch((err) => {
     console.error(err);
@@ -200,57 +278,106 @@ function remindSubmit() {
 
 <template>
   <div id="body">
-    <div class="title_container" id="teacherTitle" ref="teacherTitle" style="display: none">
-      <div class="title" @click="showDetails_2">详情</div>
-      <div class="title" @click="comment">批阅</div>
+    <div v-if="status === '老师'" class="title_container">
+      <div class="title" :class="{ active: activeView === 'details' }" @click="showDetails_2">详情</div>
+      <div class="title" :class="{ active: activeView === 'grade' }" @click="comment">批阅</div>
       <div class="title" @click="remindSubmit">催交</div>
     </div>
-    <div class="title_container" id="studentTitle" ref="studentTitle" style="display: none">
-      <div class="title" @click="showDetails">详情</div>
-      <div class="title" @click="submit">提交作业</div>
+    <div v-else-if="status" class="title_container">
+      <div class="title" :class="{ active: activeView === 'details' }" @click="showDetails">详情</div>
+      <div
+          class="title"
+          :class="{ active: activeView === 'submit', disabled: isOverdue && !mySubmission }"
+          @click="!isOverdue || mySubmission ? submit() : toast.warning('作业已截止，无法提交')"
+      >
+        提交作业
+      </div>
     </div>
 
-    <div id="homeworks_container" ref="homeworks" style="display: none">
-      <div class="homeworks">
-        <div class="box">
-          <div class="homework">
-            <img src="../assets/homework.png" alt="作业" style="width: 100px">
-            <div class="homeworkContent">
-              <div class="homeworkTitle">{{ homework.name }}</div>
-              <div class="homeworkType">
-                提交截止时间：{{ homework.deadline }} | {{ homework.type }} 100分
-              </div>
-            </div>
+    <div v-show="activeView === 'details'" class="details">
+      <img src="../assets/homeworkTitle.png" style="width: 55px" alt="">
+      <div id="details">
+        <div class="homework-name">{{ homework.name }}</div>
+        <div class="content">
+          <div class="type">{{ homework.type }}</div>
+          <div class="type">截止时间： {{ deadlineText }}</div>
+          <div class="score">100分</div>
+          <div class="type" :class="{ overdue: isOverdue }">{{ statusLabel }}</div>
+        </div>
+        <div v-if="homework.details" class="homework-desc">{{ homework.details }}</div>
+        <div v-else class="homework-desc muted">暂无作业说明</div>
+      </div>
+    </div>
+
+    <div v-show="activeView === 'submit'">
+      <div class="details homework-intro">
+        <img src="../assets/homeworkTitle.png" style="width: 55px" alt="">
+        <div>
+          <div class="homework-name">{{ homework.name }}</div>
+          <div class="content">
+            <div class="type">{{ homework.type }}</div>
+            <div class="type">截止时间： {{ deadlineText }}</div>
+            <div class="score">100分</div>
+            <div class="type" :class="{ overdue: isOverdue }">{{ statusLabel }}</div>
           </div>
+          <div v-if="homework.details" class="homework-desc">{{ homework.details }}</div>
+          <div v-else class="homework-desc muted">暂无作业说明</div>
         </div>
       </div>
+
       <div class="bottom_container">
         <div>提交内容</div>
       </div>
       <div class="bottom_box" v-if="mySubmission">
         <div>我的提交</div>
         <div style="margin-top: 12px; white-space: pre-wrap;">{{ mySubmission.details }}</div>
+        <div v-if="mySubmission.attachment_url" class="attachment-row">
+          <span>附件：</span>
+          <a :href="resolveAttachmentUrl(mySubmission.attachment_url)" target="_blank" rel="noopener">
+            {{ mySubmission.attachment_name || '下载附件' }}
+          </a>
+        </div>
         <div style="margin-top: 12px;">成绩：{{ mySubmission.score }} / 100</div>
+      </div>
+      <div class="most_bottom" v-else-if="isOverdue" >
+        <div class="overdue-tip">作业已超过截止时间，无法继续提交。</div>
       </div>
       <div class="most_bottom" v-else>
         <textarea
             v-model="submissionText"
-            class="homework_submission"
-            placeholder="请输入作业内容"></textarea>
+            class="homework_submission field-control field-textarea"
+            placeholder="请输入作业内容（可与附件二选一或同时提交）"></textarea>
+        <div class="attachment-upload">
+          <input
+              ref="attachmentInputRef"
+              type="file"
+              class="hidden-file"
+              accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z,.txt"
+              @change="onAttachmentChange"
+          >
+          <button type="button" class="btn-outline" @click="pickAttachment">选择附件</button>
+          <span v-if="attachmentFile" class="attachment-name">
+            {{ attachmentFile.name }}
+            <button type="button" class="link-btn" @click="clearAttachment">移除</button>
+          </span>
+          <span v-else class="attachment-tip">支持 PDF、Office、图片、压缩包等，最大 10MB</span>
+        </div>
         <button class="confirmSay" @click="submitHomework">提交作业</button>
       </div>
     </div>
 
-    <div id="comment_details" ref="comment_details" style="display: none;">
-      <div class="box">
-        <div class="homework">
-          <img src="../assets/homework.png" alt="作业" style="width: 100px">
-          <div class="homeworkContent">
-            <div class="homeworkTitle">{{ homework.name }}</div>
-            <div class="homeworkType">
-              提交截止时间：{{ homework.deadline }} | {{ homework.type }} 100分
-            </div>
+    <div v-show="activeView === 'grade'">
+      <div class="details homework-intro">
+        <img src="../assets/homeworkTitle.png" style="width: 55px" alt="">
+        <div>
+          <div class="homework-name">{{ homework.name }}</div>
+          <div class="content">
+            <div class="type">{{ homework.type }}</div>
+            <div class="type">截止时间： {{ deadlineText }}</div>
+            <div class="score">100分</div>
+            <div class="type" :class="{ overdue: isOverdue }">{{ statusLabel }}</div>
           </div>
+          <div v-if="homework.details" class="homework-desc">{{ homework.details }}</div>
         </div>
       </div>
       <div class="grade-panel">
@@ -266,33 +393,32 @@ function remindSubmit() {
               :class="{ active: selectedSubmission?.account === item.account }"
               @click="selectSubmission(item)"
           >
-            <div class="submission-account">{{ item.account }}</div>
-            <div class="submission-score">当前成绩：{{ item.score }} 分</div>
+            <UserAvatar
+                :avatar-url="memberProfiles[item.account]?.avatar_url"
+                :name="memberProfiles[item.account]?.name || item.account"
+                :account="item.account"
+                :size="36"
+            />
+            <div class="submission-meta">
+              <div class="submission-account">{{ memberProfiles[item.account]?.name || item.account }}</div>
+              <div class="submission-score">当前成绩：{{ item.score }} 分</div>
+            </div>
           </div>
         </div>
         <div v-if="selectedSubmission" class="grade-form">
           <div class="grade-label">提交内容</div>
           <div class="grade-content">{{ selectedSubmission.details }}</div>
+          <div v-if="selectedSubmission.attachment_url" class="attachment-row">
+            <span>附件：</span>
+            <a :href="resolveAttachmentUrl(selectedSubmission.attachment_url)" target="_blank" rel="noopener">
+              {{ selectedSubmission.attachment_name || '下载附件' }}
+            </a>
+          </div>
           <div class="grade-row">
             <label>评分（0~100）</label>
             <input v-model.number="gradeScore" type="number" min="0" max="100" class="grade-input"/>
             <button class="confirmSay" @click="saveGrade">保存批阅</button>
           </div>
-        </div>
-      </div>
-    </div>
-
-    <div ref="details_container">
-      <div class="details">
-        <img src="../assets/homeworkTitle.png" style="width: 55px">
-        <div id="details">
-          <div style="font-weight: bold;font-size: large;margin-bottom: 15px">{{ homework.name }}</div>
-          <div class="content">
-            <div class="type">{{ homework.type }}</div>
-            <div class="type">截止时间： {{ homework.deadline }}</div>
-            <div class="score">100分</div>
-          </div>
-          <div style="margin-top: 10px;font-size: 15px">{{ homework.details }}</div>
         </div>
       </div>
     </div>
@@ -315,14 +441,64 @@ function remindSubmit() {
   margin-right: 32px;
   font-size: 22px;
   cursor: pointer;
+  color: #5f6368;
+  padding-bottom: 6px;
+  border-bottom: 2px solid transparent;
+}
+
+.title.active {
+  color: rgb(66, 133, 244);
+  border-bottom-color: rgb(66, 133, 244);
+  font-weight: 600;
+}
+
+.title.disabled {
+  color: #c0c4cc;
+  cursor: not-allowed;
+}
+
+.type.overdue {
+  background-color: #fef2f2;
+  color: #ef4444;
+}
+
+.overdue-tip {
+  padding: 24px;
+  text-align: center;
+  color: #ef4444;
+  font-size: 16px;
+  background: #fef2f2;
+  border-radius: 8px;
 }
 
 .details {
   display: flex;
   flex-direction: column;
   border: 1px solid rgb(204, 204, 204);
-  margin-top: 40px;
+  margin-top: 20px;
   border-radius: 10px;
+  padding: 16px;
+}
+
+.homework-intro {
+  margin-bottom: 0;
+}
+
+.homework-name {
+  font-weight: bold;
+  font-size: large;
+  margin-bottom: 15px;
+}
+
+.homework-desc {
+  margin-top: 10px;
+  font-size: 15px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.homework-desc.muted {
+  color: #9ca3af;
 }
 
 #details {
@@ -452,6 +628,13 @@ function remindSubmit() {
   border: 1px solid rgb(218, 220, 224);
   border-radius: 8px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.submission-meta {
+  min-width: 0;
 }
 
 .submission-item.active {
@@ -501,5 +684,45 @@ function remindSubmit() {
   padding: 0 8px;
   border: 1px solid rgb(218, 220, 224);
   border-radius: 6px;
+}
+
+.attachment-upload {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.hidden-file {
+  display: none;
+}
+
+.attachment-name {
+  font-size: 14px;
+  color: #374151;
+}
+
+.attachment-tip {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.attachment-row {
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+.attachment-row a {
+  color: rgb(72, 138, 248);
+  text-decoration: none;
+}
+
+.link-btn {
+  border: none;
+  background: none;
+  color: #ef4444;
+  cursor: pointer;
+  margin-left: 8px;
 }
 </style>

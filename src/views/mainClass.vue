@@ -4,9 +4,11 @@ import {storeToRefs} from "pinia";
 import {useAccountStore} from "@/stores/account.js";
 import {computed, onMounted, ref, watch} from "vue";
 import request from "@/utils/request.js";
+import UserAvatar from '@/components/UserAvatar.vue';
+import {formatDateTime} from '@/utils/homeworkDeadline.js';
 
 const accountStore = useAccountStore();
-const {account} = storeToRefs(accountStore);
+const {account, avatarUrl, name} = storeToRefs(accountStore);
 const router = useRouter();
 const route = useRoute();
 
@@ -78,6 +80,7 @@ function goCourseFromBreadcrumb() {
 function logout() {
   accountStore.logout();
   showUserMenu.value = false;
+  sessionStorage.setItem('freshLogin', '1');
   router.push({ name: 'login' });
 }
 
@@ -105,6 +108,34 @@ function readNotification(item) {
         item.is_read = true;
         loadNotificationCount();
       });
+}
+
+function openNotification(item) {
+  readNotification(item);
+  if (item.homework_id && item.class_id) {
+    closePanels();
+    const target = {
+      name: 'homeworkContent',
+      params: { id: String(item.homework_id) },
+      query: { classId: String(item.class_id) },
+    };
+    const sameHomework = route.name === 'homeworkContent'
+        && String(route.params.id) === String(item.homework_id)
+        && String(route.query.classId || '') === String(item.class_id);
+    if (sameHomework) return;
+    router.push(target).catch(() => {
+      router.replace(target);
+    });
+    return;
+  }
+  if (item.class_id) {
+    closePanels();
+    const query = { id: String(item.class_id) };
+    if (item.type === 'announcement') {
+      query.section = 'announcement';
+    }
+    router.push({ name: 'courseContent', query });
+  }
 }
 
 function loadSubPageTitles() {
@@ -169,7 +200,20 @@ watch(
 
 onMounted(() => {
   loadNotificationCount();
+  loadProfile();
 });
+
+function loadProfile() {
+  if (!account.value) return;
+  request.post('/editor/account', { account: account.value })
+      .then(res => {
+        if (res?.account) {
+          accountStore.setAvatarUrl(res.avatar_url || null);
+          accountStore.setName(res.name || null);
+        }
+      })
+      .catch(() => {});
+}
 </script>
 
 <template>
@@ -227,7 +271,7 @@ onMounted(() => {
             @mouseleave="closeUserMenu"
         >
           <div class="avatar-wrap">
-            <img src="@/assets/head.png" class="avatar-img" alt="头像">
+            <UserAvatar :avatar-url="avatarUrl" :name="name" :account="account" :size="40" />
           </div>
           <div v-show="showUserMenu" class="user-dropdown">
             <ul class="user-dropdown-list">
@@ -248,11 +292,14 @@ onMounted(() => {
             v-for="item in notifications"
             :key="item.id"
             class="notify-item"
-            :class="{ unread: !item.is_read }"
-            @click="readNotification(item)"
+            :class="{ unread: !item.is_read, clickable: item.homework_id || item.class_id }"
+            @click="openNotification(item)"
         >
           <div>{{ item.message }}</div>
-          <div class="notify-time">{{ item.create_time }}</div>
+          <div class="notify-time">
+            {{ formatDateTime(item.create_time) }}
+            <span v-if="item.homework_id" class="notify-link-hint">点击查看作业</span>
+          </div>
         </div>
       </div>
     </header>
@@ -435,6 +482,15 @@ onMounted(() => {
 
 .notify-item.unread {
   background: #f0f7ff;
+}
+
+.notify-item.clickable:hover {
+  background: #eef2ff;
+}
+
+.notify-link-hint {
+  margin-left: 8px;
+  color: rgb(72, 138, 248);
 }
 
 .notify-time {

@@ -4,7 +4,7 @@ import PasswordInput from '@/components/PasswordInput.vue'
 import {RouterView, useRoute, useRouter} from "vue-router";
 import request from "@/utils/request.js";
 import {useAccountStore} from "@/stores/account.js";
-import {reactive, ref} from "vue";
+import {reactive, ref, onMounted, nextTick} from "vue";
 import {validateAccount, validateLoginPassword, validatePhone} from '@/utils/formValidate.js';
 import {toast} from '@/utils/toast.js';
 
@@ -55,6 +55,32 @@ function setPasswordFieldWidth(px) {
   }
 }
 
+function resetLoginForm() {
+  form.account = '';
+  form.password = '';
+  errors.account = '';
+  errors.password = '';
+}
+
+function clearAutofillAfterLogout() {
+  if (!sessionStorage.getItem('freshLogin')) return;
+  sessionStorage.removeItem('freshLogin');
+  resetLoginForm();
+  nextTick(() => {
+    const accountInput = document.getElementById('input_acc');
+    const passwordInput = document.getElementById('password');
+    if (accountInput) accountInput.value = '';
+    if (passwordInput) passwordInput.value = '';
+  });
+}
+
+onMounted(() => {
+  resetLoginForm();
+  clearAutofillAfterLogout();
+  // 浏览器可能在渲染后再自动填充，延迟再清一次
+  setTimeout(clearAutofillAfterLogout, 50);
+});
+
 function loginBut() {
   if (!validateAll()) return;
 
@@ -63,7 +89,10 @@ function loginBut() {
     password: form.password,
   }).then(response => {
     if (response && response.account) {
-      accountStore.setAccount(form.account.trim());
+      accountStore.setAccount(response.account, {
+        avatar_url: response.avatar_url,
+        name: response.name,
+      });
       toast.success('登陆成功');
       router.push('/mainClass');
     } else {
@@ -128,7 +157,7 @@ function wechatM() {
         <span class="tab" :class="{ 'active-tab': loginMode === 'phone' }" @click="phoneNumM" id="phoneNum">手机短信登录</span>
         <span class="tab" :class="{ 'active-tab': loginMode === 'wechat' }" @click="wechatM" id="wechat">微信登陆</span>
       </div>
-      <div class="login_form" id="login_form">
+      <div class="login_form" id="login_form" autocomplete="off">
         <input
             v-model="form.account"
             type="text"
@@ -136,6 +165,10 @@ function wechatM() {
             class="input"
             :class="{ 'input-invalid': errors.account }"
             id="input_acc"
+            name="classpi-account"
+            autocomplete="off"
+            readonly
+            @focus="($event.target).removeAttribute('readonly')"
             @blur="validateField('account')"
         >
         <span class="error-message" :class="{ visible: errors.account }">{{ errors.account || ' ' }}</span>

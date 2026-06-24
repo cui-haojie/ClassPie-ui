@@ -6,6 +6,7 @@ import request from "@/utils/request.js";
 import {useRouter} from "vue-router";
 import {toast} from '@/utils/toast.js';
 import PasswordInput from '@/components/PasswordInput.vue';
+import UserAvatar from '@/components/UserAvatar.vue';
 import {INSTITUTION_OPTIONS, resolveMechanism} from '@/constants/institutions.js';
 import {
   validateMechanism,
@@ -23,6 +24,10 @@ const saving = ref(false);
 const accountStore = useAccountStore();
 const {account} = storeToRefs(accountStore);
 const router = useRouter();
+
+const avatarUrl = ref('')
+const avatarInputRef = ref(null)
+const uploadingAvatar = ref(false)
 
 const account_1 = ref('')
 const name = ref('')
@@ -92,6 +97,9 @@ function update() {
         mechanism.value = res.mechanism || ''
         email_or_phone.value = res.email_or_phone || ''
         status_number.value = res.status_number || ''
+        avatarUrl.value = res.avatar_url || ''
+        accountStore.setAvatarUrl(res.avatar_url || null)
+        accountStore.setName(res.name || null)
       })
       .catch(error => {
         console.error(error)
@@ -235,6 +243,7 @@ async function saveEdit(field) {
         toast.success('密码修改成功，请重新登录')
         cancelEdit()
         accountStore.logout()
+        sessionStorage.setItem('freshLogin', '1')
         router.push({ name: 'login' })
       } else {
         toast.error('密码修改失败')
@@ -304,6 +313,45 @@ function bindHint(feature) {
   toast.info(`${feature}功能暂未开放`)
 }
 
+function pickAvatar() {
+  avatarInputRef.value?.click()
+}
+
+function onAvatarChange(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  if (!file.type.startsWith('image/')) {
+    toast.warning('请选择图片文件')
+    return
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    toast.warning('头像大小不能超过 2MB')
+    return
+  }
+  const formData = new FormData()
+  formData.append('account', account.value)
+  formData.append('file', file)
+  uploadingAvatar.value = true
+  request.post('/editor/uploadAvatar', formData)
+      .then(res => {
+        if (res?.avatar_url) {
+          avatarUrl.value = res.avatar_url
+          accountStore.setAvatarUrl(res.avatar_url)
+          toast.success('头像更新成功')
+        } else {
+          toast.error(res?.message || '头像上传失败')
+        }
+      })
+      .catch(err => {
+        console.error(err)
+        toast.error('头像上传失败')
+      })
+      .finally(() => {
+        uploadingAvatar.value = false
+        if (avatarInputRef.value) avatarInputRef.value.value = ''
+      })
+}
+
 onMounted(() => {
   loadSchoolClasses()
 })
@@ -315,7 +363,17 @@ update()
   <div class="user-settings-page">
     <div class="us-container">
       <div class="us-header">
-        <img src="@/assets/head.png" class="us-avatar" alt="头像"/>
+        <div class="us-avatar-wrap" @click="pickAvatar">
+          <UserAvatar :avatar-url="avatarUrl" :name="name" :account="account_1" :size="114" clickable />
+          <span class="us-avatar-mask">{{ uploadingAvatar ? '上传中…' : '更换头像' }}</span>
+          <input
+              ref="avatarInputRef"
+              type="file"
+              accept="image/jpeg,image/png,image/gif,image/webp"
+              class="hidden-file"
+              @change="onAvatarChange"
+          >
+        </div>
         <div class="us-info">
           <h2 class="us-username">{{ name || account_1 }}</h2>
           <button type="button" class="us-vip-btn">开通课堂派VIP</button>
@@ -670,11 +728,32 @@ update()
   margin-top: 20px;
 }
 
-.us-avatar {
-  width: 114px;
-  height: 114px;
-  border-radius: 57px;
+.us-avatar-wrap {
+  position: relative;
   margin-right: 20px;
+  cursor: pointer;
+}
+
+.us-avatar-mask {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.45);
+  color: #fff;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.us-avatar-wrap:hover .us-avatar-mask {
+  opacity: 1;
+}
+
+.hidden-file {
+  display: none;
 }
 
 .us-info {

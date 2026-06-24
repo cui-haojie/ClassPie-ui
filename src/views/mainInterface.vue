@@ -1,17 +1,20 @@
 <script setup lang="js" name="mainInterface">
 import {useRouter} from "vue-router";
 import {useAccountStore} from "@/stores/account.js";
+import {useCourseUiStore} from "@/stores/courseUi.js";
 import {storeToRefs} from "pinia";
 import request from "@/utils/request.js";
 import {toast} from '@/utils/toast.js';
-import {ref, onMounted, onBeforeUnmount, reactive, watch} from "vue";
+import {ref, onMounted, reactive, watch} from "vue";
 import {computed} from "vue";
 import {INSTITUTION_OPTIONS, resolveMechanism} from '@/constants/institutions.js';
 import {SEMESTER_OPTIONS, formatSemester, getDefaultSemester} from '@/constants/semesters.js';
-import {lockBodyScroll, unlockBodyScroll} from '@/utils/scrollLock.js';
+import AppModal from '@/components/AppModal.vue';
+import {appConfirm} from '@/utils/confirm.js';
 
 const router = useRouter();
 const accountStore = useAccountStore();
+const courseUiStore = useCourseUiStore();
 const {account} = storeToRefs(accountStore);
 console.log(account.value)
 const account_1 = ref('')
@@ -29,8 +32,6 @@ const learn = ref(null)
 const teach = ref(null)
 const searchKeyword = ref('')
 const courseListVisible = ref(true)
-const activeTab = ref('all')
-const selectedSemester = ref(getDefaultSemester())
 const showArchiveModal = ref(false)
 const archivedCourses = ref([])
 const schoolClasses = ref([])
@@ -44,6 +45,22 @@ const classToAdd = ref('')
 const importTargetClassId = ref('')
 const institutionOptions = INSTITUTION_OPTIONS
 const semesterOptions = SEMESTER_OPTIONS
+const draggingCourseId = ref(null)
+const dragOverCourseId = ref(null)
+const showJoinModal = ref(false)
+const showCreateModal = ref(false)
+const showChoiceMenu = ref(false)
+const joinCode = ref('')
+
+const activeTab = computed({
+  get: () => courseUiStore.activeTab,
+  set: (val) => { courseUiStore.activeTab = val },
+})
+
+const selectedSemester = computed({
+  get: () => courseUiStore.selectedSemester,
+  set: (val) => { courseUiStore.selectedSemester = val },
+})
 
 const createForm = reactive({
   class_name: '',
@@ -53,7 +70,7 @@ const createForm = reactive({
 })
 
 const pinnedCourses = computed(() =>
-    semesterScopedCourses.value.filter(course => course.is_pinned)
+    courses.value.filter(course => course.is_pinned)
 );
 
 const availableSemesters = computed(() => {
@@ -119,7 +136,13 @@ const filteredCourses = computed(() => {
   });
 });
 
-watch(status, (val) => {
+const canDragSort = computed(() =>
+    selectedSemester.value === 'all' &&
+    activeTab.value === 'all' &&
+    !searchKeyword.value
+)
+
+watch(() => status.value, (val) => {
   if (val === '学生' && activeTab.value === 'teach') {
     activeTab.value = 'all';
   }
@@ -210,27 +233,30 @@ function loadCourse() {
 console.log(courses.value[0])
 
 function Choice() {
-  choice.style.display = choice.style.display === 'none' ? 'block' : 'none';
+  showChoiceMenu.value = !showChoiceMenu.value;
+}
+
+function closeJoinModal() {
+  showJoinModal.value = false;
+  joinCode.value = '';
+}
+
+function closeCreateModal() {
+  showCreateModal.value = false;
+  resetCreateForm();
 }
 
 function cancel() {
-  around.style.display = 'none';
-  join_class.style.display = 'none';
-  code_input.value = '';
-  unlockBodyScroll();
+  closeJoinModal();
 }
 
 function kill() {
-  around.style.display = 'none';
-  join_class.style.display = 'none';
-  code_input.value = '';
-  unlockBodyScroll();
+  closeJoinModal();
 }
 
 function joinClass() {
-  around.style.display = 'block';
-  join_class.style.display = 'block';
-  lockBodyScroll();
+  showChoiceMenu.value = false;
+  showJoinModal.value = true;
 }
 
 function loadSchoolClasses() {
@@ -242,12 +268,11 @@ function loadSchoolClasses() {
 }
 
 function createClass() {
+  showChoiceMenu.value = false;
   loadSchoolClasses();
   newClassInstitution.value = mechanism.value || '';
   resetCreateForm();
-  around.style.display = 'block';
-  create_class.style.display = 'block';
-  lockBodyScroll();
+  showCreateModal.value = true;
 }
 
 function getSchoolClassLabel(id) {
@@ -405,23 +430,20 @@ function resetCreateForm() {
 }
 
 function kill2() {
-  around.style.display = 'none';
-  create_class.style.display = 'none';
-  resetCreateForm();
-  unlockBodyScroll();
+  closeCreateModal();
 }
 
-onBeforeUnmount(() => {
-  unlockBodyScroll();
-});
-
 function cancel2() {
-  kill2();
+  closeCreateModal();
 }
 
 function confirmClass() {
-  let code = document.getElementById("code_input").value;
-  request.post("/editor/addCourse", {account: account.value, code: code})
+  const code = joinCode.value.trim();
+  if (!code) {
+    toast.warning('请输入加课码');
+    return;
+  }
+  request.post("/editor/addCourse", {account: account.value, code})
       .then((res) => {
         if (res) {
           toast.success("课程添加成功")
@@ -480,6 +502,60 @@ function toTop(courseId) {
   });
 }
 
+function onDragStart(courseId, event) {
+  draggingCourseId.value = courseId
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', String(courseId))
+}
+
+function onDragOverCourse(courseId, event) {
+  event.preventDefault()
+  if (draggingCourseId.value && draggingCourseId.value !== courseId) {
+    dragOverCourseId.value = courseId
+  }
+}
+
+function onDragLeaveCourse() {
+  dragOverCourseId.value = null
+}
+
+function onDropCourse(targetCourseId, event) {
+  event.preventDefault()
+  const sourceId = draggingCourseId.value || Number(event.dataTransfer.getData('text/plain'))
+  dragOverCourseId.value = null
+  draggingCourseId.value = null
+  if (!sourceId || sourceId === targetCourseId) return
+  reorderCourses(sourceId, targetCourseId)
+}
+
+function onDragEnd() {
+  draggingCourseId.value = null
+  dragOverCourseId.value = null
+}
+
+function reorderCourses(sourceId, targetId) {
+  const fromIndex = courses.value.findIndex(course => course.id === sourceId)
+  const toIndex = courses.value.findIndex(course => course.id === targetId)
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return
+
+  const list = [...courses.value]
+  const [moved] = list.splice(fromIndex, 1)
+  list.splice(toIndex, 0, moved)
+  courses.value = list
+  saveCourseOrder(list.map(course => course.id))
+}
+
+function saveCourseOrder(courseIds) {
+  request.put('/editor/updateCourseOrder', {
+    account: account.value,
+    course_ids: courseIds,
+  }).catch(err => {
+    console.error('保存排序失败:', err)
+    toast.error('课程排序保存失败')
+    loadCourse()
+  })
+}
+
 function toggleCourseList() {
   courseListVisible.value = !courseListVisible.value
 }
@@ -508,7 +584,8 @@ function handleClick(courseId) {
 function deleteCourse(courseId) {
   const course = courses.value.find(item => item.id === courseId)
   const action = course && isTeachingCourse(course) ? '退出该课程' : '退课'
-  if (confirm(`确定${action}？`)) {
+  appConfirm(`确定${action}？`, { title: action, danger: true }).then(ok => {
+    if (!ok) return
     request.post("/editor/deleteCourse", {id: courseId, account: account.value})
         .then(response => {
           if (response) {
@@ -519,22 +596,23 @@ function deleteCourse(courseId) {
       console.log(error);
       toast.error("操作失败：" + error.message);
     })
-  } else return;
+  })
 }
 
 function archiveCourse(courseId) {
-  if (confirm('确定归档该课程？归档后可在归档管理中恢复')) {
+  appConfirm('确定归档该课程？归档后可在归档管理中恢复', { title: '归档课程' }).then(ok => {
+    if (!ok) return
     request.put('/editor/archiveCourse', {
       account: account.value,
       class_id: courseId,
       archived: true
-    }).then(ok => {
-      if (ok) {
+    }).then(resOk => {
+      if (resOk) {
         toast.success('归档成功')
         loadCourse()
       }
     })
-  }
+  })
 }
 
 function openArchiveModal() {
@@ -567,141 +645,142 @@ function restoreCourse(courseId) {
 
 </script>
 <template>
-  <div id="around" class="modal-overlay"></div>
-  <div class="modal-box modal-box-sm" id="join_class">
-    <div class="create-modal-header compact">
-      <div>
-        <h2 class="create-modal-title">加入课程</h2>
-        <p class="create-modal-subtitle">输入教师提供的加课码</p>
-      </div>
-      <button type="button" class="modal-close-btn" @click="kill">×</button>
-    </div>
-    <div class="create-modal-body compact-body">
-      <label class="form-field">
-        <span class="field-label">加课码</span>
-        <input id="code_input" type="text" placeholder="请输入课程加课码" class="field-control">
-      </label>
-    </div>
-    <div class="create-modal-footer">
+  <AppModal v-model="showJoinModal" title="加入课程" subtitle="输入教师提供的加课码" size="sm">
+    <label class="form-field">
+      <span class="field-label">加课码</span>
+      <input v-model="joinCode" type="text" placeholder="请输入课程加课码" class="field-control">
+    </label>
+    <template #footer>
       <button type="button" class="btn-ghost" @click="cancel">取消</button>
       <button type="button" class="btn-primary" @click="confirmClass">加入</button>
-    </div>
-  </div>
-  <div class="modal-box modal-box-lg" id="create_class" style="display: none">
-    <div class="create-modal-header">
-      <div>
-        <h2 class="create-modal-title">创建课程</h2>
-        <p class="create-modal-subtitle">填写课程信息，关联行政班后学生将自动加入</p>
-      </div>
-      <button type="button" class="modal-close-btn" @click="kill2">×</button>
-    </div>
+    </template>
+  </AppModal>
 
-    <div class="create-modal-body">
-      <section class="form-section">
-        <h3 class="section-title">基本信息</h3>
-        <div class="form-grid">
+  <AppModal
+      v-model="showCreateModal"
+      title="创建课程"
+      subtitle="填写课程信息，关联行政班后学生将自动加入"
+      size="xl"
+  >
+    <section class="form-section">
+      <h3 class="section-title">基本信息</h3>
+      <div class="form-grid">
+        <label class="form-field">
+          <span class="field-label">课程名称 <em>*</em></span>
+          <input v-model="createForm.class_name" type="text" class="field-control" placeholder="例如：Java 程序设计">
+        </label>
+        <label class="form-field">
+          <span class="field-label">学年学期</span>
+          <select v-model="createForm.semester" class="field-control field-select">
+            <option v-for="item in semesterOptions" :key="item.value" :value="item.value">
+              {{ item.label }}
+            </option>
+          </select>
+        </label>
+        <label class="form-field">
+          <span class="field-label">课程时间</span>
+          <input v-model="createForm.class_time" type="text" class="field-control" placeholder="例如：周一 1-2 节">
+        </label>
+        <label class="form-field form-field-full">
+          <span class="field-label">教学班级展示名</span>
+          <input v-model="createForm.selected_classes" type="text" class="field-control" placeholder="可留空，将自动使用行政班名称">
+        </label>
+      </div>
+    </section>
+
+    <section class="form-section">
+      <h3 class="section-title">关联行政班</h3>
+      <p class="section-desc">不关联班级时，学生需通过加课码手动加入</p>
+      <div class="form-row-inline">
+        <select v-model="classToAdd" class="field-control field-select">
+          <option value="">请选择行政班级</option>
+          <option v-for="sc in schoolClasses" :key="sc.id" :value="String(sc.id)">
+            {{ sc.name }}{{ sc.mechanism ? ' · ' + sc.mechanism : '' }}
+          </option>
+        </select>
+        <button type="button" class="btn-outline" @click="addClassFromDropdown">添加</button>
+      </div>
+      <div v-if="selectedSchoolClassIds.length" class="tag-list">
+        <span v-for="id in selectedSchoolClassIds" :key="id" class="class-tag">
+          {{ getSchoolClassLabel(id) }}
+          <button type="button" class="tag-remove" @click="removeSelectedClass(id)">×</button>
+        </span>
+      </div>
+      <p v-else class="empty-hint">暂未选择班级</p>
+    </section>
+
+    <section class="form-section form-section-muted">
+      <h3 class="section-title">新建班级</h3>
+      <div class="form-grid form-grid-3">
+        <label class="form-field">
+          <span class="field-label">班级名称</span>
+          <input v-model="newClassName" type="text" class="field-control" placeholder="例如：软件 2201">
+        </label>
+        <label class="form-field">
+          <span class="field-label">所属学校</span>
+          <select v-model="newClassInstitution" class="field-control field-select">
+            <option value="">请选择学校</option>
+            <option v-for="item in institutionOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+          </select>
+        </label>
+        <div class="form-field form-field-action">
+          <span class="field-label">&nbsp;</span>
+          <button type="button" class="btn-primary-block" @click="addSchoolClass">创建班级</button>
+        </div>
+      </div>
+      <label v-if="newClassInstitution === '__other__'" class="form-field">
+        <span class="field-label">其他学校名称</span>
+        <input v-model="newClassCustomMechanism" type="text" class="field-control" placeholder="请输入学校/机构名称">
+      </label>
+    </section>
+
+    <section class="form-section form-section-muted">
+      <h3 class="section-title">Excel 批量导入学生</h3>
+      <div class="import-panel">
+        <div class="import-panel-row">
           <label class="form-field">
-            <span class="field-label">课程名称 <em>*</em></span>
-            <input v-model="createForm.class_name" type="text" class="field-control" placeholder="例如：Java 程序设计">
-          </label>
-          <label class="form-field">
-            <span class="field-label">学年学期</span>
-            <select v-model="createForm.semester" class="field-control field-select">
-              <option v-for="item in semesterOptions" :key="item.value" :value="item.value">
-                {{ item.label }}
+            <span class="field-label">导入目标班级</span>
+            <select v-model="importTargetClassId" class="field-control field-select">
+              <option value="">请选择班级</option>
+              <option v-for="sc in schoolClasses" :key="'import-' + sc.id" :value="String(sc.id)">
+                {{ sc.name }}{{ sc.mechanism ? ' · ' + sc.mechanism : '' }}
               </option>
             </select>
           </label>
-          <label class="form-field">
-            <span class="field-label">课程时间</span>
-            <input v-model="createForm.class_time" type="text" class="field-control" placeholder="例如：周一 1-2 节">
-          </label>
-          <label class="form-field form-field-full">
-            <span class="field-label">教学班级展示名</span>
-            <input v-model="createForm.selected_classes" type="text" class="field-control" placeholder="可留空，将自动使用行政班名称">
+          <label class="form-field file-field">
+            <span class="field-label">学生名单</span>
+            <input ref="excelInputRef" type="file" accept=".xlsx,.xls" class="field-control file-control" @change="onExcelFileChange">
           </label>
         </div>
-      </section>
-
-      <section class="form-section">
-        <h3 class="section-title">关联行政班</h3>
-        <p class="section-desc">不关联班级时，学生需通过加课码手动加入</p>
-        <div class="form-row-inline">
-          <select v-model="classToAdd" class="field-control field-select">
-            <option value="">请选择行政班级</option>
-            <option v-for="sc in schoolClasses" :key="sc.id" :value="String(sc.id)">
-              {{ sc.name }}{{ sc.mechanism ? ' · ' + sc.mechanism : '' }}
-            </option>
-          </select>
-          <button type="button" class="btn-outline" @click="addClassFromDropdown">添加</button>
+        <div class="import-panel-actions">
+          <button type="button" class="btn-text" @click="downloadImportTemplate">下载 Excel 模板</button>
+          <button type="button" class="btn-outline" @click="addSchoolClassWithImport">新建班级并导入</button>
+          <button type="button" class="btn-primary" @click="importToSelectedClass">导入到所选班级</button>
         </div>
-        <div v-if="selectedSchoolClassIds.length" class="tag-list">
-          <span v-for="id in selectedSchoolClassIds" :key="id" class="class-tag">
-            {{ getSchoolClassLabel(id) }}
-            <button type="button" class="tag-remove" @click="removeSelectedClass(id)">×</button>
-          </span>
-        </div>
-        <p v-else class="empty-hint">暂未选择班级</p>
-      </section>
+        <p class="import-tip">模板列：账号、姓名、学号、密码（可选，默认 ClassPi123）</p>
+      </div>
+    </section>
 
-      <section class="form-section form-section-muted">
-        <h3 class="section-title">新建班级</h3>
-        <div class="form-grid form-grid-3">
-          <label class="form-field">
-            <span class="field-label">班级名称</span>
-            <input v-model="newClassName" type="text" class="field-control" placeholder="例如：软件 2201">
-          </label>
-          <label class="form-field">
-            <span class="field-label">所属学校</span>
-            <select v-model="newClassInstitution" class="field-control field-select">
-              <option value="">请选择学校</option>
-              <option v-for="item in institutionOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
-            </select>
-          </label>
-          <div class="form-field form-field-action">
-            <span class="field-label">&nbsp;</span>
-            <button type="button" class="btn-primary-block" @click="addSchoolClass">创建班级</button>
-          </div>
-        </div>
-        <label v-if="newClassInstitution === '__other__'" class="form-field form-field-full">
-          <span class="field-label">其他学校名称</span>
-          <input v-model="newClassCustomMechanism" type="text" class="field-control" placeholder="请输入学校/机构名称">
-        </label>
-      </section>
-
-      <section class="form-section form-section-muted">
-        <h3 class="section-title">Excel 批量导入学生</h3>
-        <div class="import-panel">
-          <div class="import-panel-row">
-            <label class="form-field">
-              <span class="field-label">导入目标班级</span>
-              <select v-model="importTargetClassId" class="field-control field-select">
-                <option value="">请选择班级</option>
-                <option v-for="sc in schoolClasses" :key="'import-' + sc.id" :value="String(sc.id)">
-                  {{ sc.name }}{{ sc.mechanism ? ' · ' + sc.mechanism : '' }}
-                </option>
-              </select>
-            </label>
-            <label class="form-field file-field">
-              <span class="field-label">学生名单</span>
-              <input ref="excelInputRef" type="file" accept=".xlsx,.xls" class="field-control file-control" @change="onExcelFileChange">
-            </label>
-          </div>
-          <div class="import-panel-actions">
-            <button type="button" class="btn-text" @click="downloadImportTemplate">下载 Excel 模板</button>
-            <button type="button" class="btn-outline" @click="addSchoolClassWithImport">新建班级并导入</button>
-            <button type="button" class="btn-primary" @click="importToSelectedClass">导入到所选班级</button>
-          </div>
-          <p class="import-tip">模板列：账号、姓名、学号、密码（可选，默认 ClassPi123）</p>
-        </div>
-      </section>
-    </div>
-
-    <div class="create-modal-footer">
+    <template #footer>
       <button type="button" class="btn-ghost" @click="cancel2">取消</button>
       <button type="button" class="btn-primary btn-primary-lg" @click="CreateClass">创建课程</button>
+    </template>
+  </AppModal>
+
+  <AppModal v-model="showArchiveModal" title="归档管理" subtitle="已归档课程可恢复或退课" size="md">
+    <div v-if="archivedCourses.length === 0" class="archive-empty">暂无归档课程</div>
+    <div v-for="course in archivedCourses" :key="course.id" class="archive-item">
+      <span>{{ course.class_name }}（{{ course.teacherName }}）</span>
+      <div class="archive-actions">
+        <button type="button" class="btn-outline" @click="restoreCourse(course.id)">恢复</button>
+        <button type="button" class="btn-ghost" @click="deleteCourse(course.id)">退课</button>
+      </div>
     </div>
-  </div>
+    <template #footer>
+      <button type="button" class="btn-primary" @click="showArchiveModal = false">关闭</button>
+    </template>
+  </AppModal>
+
   <div class="main">
     <div class="Top">
       <div class="top-header">
@@ -711,9 +790,9 @@ function restoreCourse(courseId) {
           </button>
           <button class="join join-wide" @click="Choice" id="joinOrCreate" ref="joinOrCreate">＋加入/创建课程
           </button>
-          <ul id="choice" style="display: none;background-color: #FFFFFF;">
-            <li id="student_but_2" @click="joinClass">加入课程</li>
-            <li id="teacher_but" @click="createClass">创建课程</li>
+          <ul v-show="showChoiceMenu" class="choice-menu">
+            <li @click="joinClass">加入课程</li>
+            <li @click="createClass">创建课程</li>
           </ul>
         </div>
       </div>
@@ -793,12 +872,29 @@ function restoreCourse(courseId) {
             </select>
           </label>
         </div>
-        <div class="bt_right" @click="toggleCourseList">
-          {{ courseListVisible ? '收起' : '展开' }}
+        <div class="bt_right">
+          <span v-if="canDragSort" class="drag-tip">拖动卡片可调整顺序</span>
+          <span class="toggle-list" @click="toggleCourseList">
+            {{ courseListVisible ? '收起' : '展开' }}
+          </span>
         </div>
       </div>
       <div v-show="courseListVisible" class="container" ref="container" id="top_container">
-        <div class="course-card" v-for="(course, index) in filteredCourses" :key="course.id">
+        <div
+            class="course-card"
+            v-for="course in filteredCourses"
+            :key="course.id"
+            :class="{
+              'is-dragging': draggingCourseId === course.id,
+              'drag-over': dragOverCourseId === course.id
+            }"
+            :draggable="canDragSort"
+            @dragstart="onDragStart(course.id, $event)"
+            @dragover="onDragOverCourse(course.id, $event)"
+            @dragleave="onDragLeaveCourse"
+            @drop="onDropCourse(course.id, $event)"
+            @dragend="onDragEnd"
+        >
           <div
               class="course-card-cover"
               :class="'theme-' + getCourseThemeIndex(course)"
@@ -816,6 +912,7 @@ function restoreCourse(courseId) {
           </div>
           <div class="course-card-footer">
             <div class="course-card-footer-info">
+              <span class="drag-handle" title="拖动排序">⋮⋮</span>
               <span class="role-tag" :class="{ 'teach-tag': isTeachingCourse(course) }">
                 {{ isTeachingCourse(course) ? '教' : '学' }}
               </span>
@@ -831,18 +928,6 @@ function restoreCourse(courseId) {
           </div>
         </div>
       </div>
-    </div>
-  </div>
-  <div v-if="showArchiveModal" class="archive-modal" @click.self="showArchiveModal = false">
-    <div class="archive-box">
-      <h3>归档管理</h3>
-      <div v-if="archivedCourses.length === 0" class="archive-empty">暂无归档课程</div>
-      <div v-for="course in archivedCourses" :key="course.id" class="archive-item">
-        <span>{{ course.class_name }}（{{ course.teacherName }}）</span>
-        <button @click="restoreCourse(course.id)">恢复</button>
-        <button @click="deleteCourse(course.id)">退课</button>
-      </div>
-      <button class="archive-close" @click="showArchiveModal = false">关闭</button>
     </div>
   </div>
 </template>
@@ -867,6 +952,34 @@ function restoreCourse(courseId) {
 
 .top-actions {
   position: relative;
+}
+
+.choice-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 140px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+  border: 1px solid #eef2f7;
+  overflow: hidden;
+  z-index: 20;
+  list-style: none;
+  padding: 6px 0;
+  margin: 0;
+}
+
+.choice-menu li {
+  padding: 10px 16px;
+  font-size: 15px;
+  color: #374151;
+  cursor: pointer;
+}
+
+.choice-menu li:hover {
+  background: #f3f4f6;
+  color: rgb(72, 138, 248);
 }
 
 .join {
@@ -1534,6 +1647,17 @@ input:focus {
 .bt_right {
   font-size: 20px;
   color: rgb(72, 138, 248);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.drag-tip {
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.toggle-list {
   cursor: pointer;
 }
 
@@ -1619,6 +1743,30 @@ ul {
 .course-card:hover {
   transform: translateY(-4px);
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+}
+
+.course-card.is-dragging {
+  opacity: 0.55;
+  transform: scale(0.98);
+  cursor: grabbing;
+}
+
+.course-card.drag-over {
+  box-shadow: 0 0 0 2px rgb(72, 138, 248);
+}
+
+.drag-handle {
+  flex-shrink: 0;
+  color: #9ca3af;
+  font-size: 14px;
+  letter-spacing: -2px;
+  cursor: grab;
+  user-select: none;
+  padding: 0 2px;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
 }
 
 .course-card-cover {

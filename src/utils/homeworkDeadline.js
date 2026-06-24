@@ -1,0 +1,118 @@
+/**
+ * 作业时间：展示与截止判断均精确到分钟（不含秒、毫秒）。
+ */
+
+function pad2(n) {
+  return String(n).padStart(2, '0')
+}
+
+/** 从任意后端时间字符串提取到分钟 */
+export function formatDeadline(value) {
+  if (value == null || value === '') return '-'
+
+  if (typeof value === 'number') {
+    return formatDateMinute(new Date(value))
+  }
+
+  let text = String(value).trim()
+  // 去掉毫秒、时区
+  text = text.replace(/\.\d+/, '').replace(/Z$/, '').replace(/[+-]\d{2}:\d{2}$/, '')
+
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{1,2}):(\d{2}))?/)
+  if (match) {
+    const [, datePart, hh, mm] = match
+    // 仅日期或 00:00 → 当天 23:59 截止
+    if (!hh || (hh === '00' && mm === '00')) {
+      return `${datePart} 23:59`
+    }
+    return `${datePart} ${pad2(Number(hh))}:${mm}`
+  }
+
+  const date = parseDeadline(value)
+  if (!date) {
+    // 兜底：截掉秒
+    return text.replace(/:\d{2}$/, '').slice(0, 16).replace('T', ' ')
+  }
+  return formatDateMinute(date)
+}
+
+/** 通用时间（通知等），精确到分钟 */
+export function formatDateTime(value) {
+  return formatDeadline(value)
+}
+
+function formatDateMinute(date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+
+export function parseDeadline(value) {
+  if (value == null || value === '') return null
+
+  if (typeof value === 'number') {
+    const date = new Date(value)
+    return Number.isNaN(date.getTime()) ? null : truncateToMinute(date)
+  }
+
+  let text = String(value).trim()
+  text = text.replace(/\.\d+/, '').replace(/Z$/, '').replace(/[+-]\d{2}:\d{2}$/, '')
+
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{1,2}):(\d{2})(?::\d{2})?)?$/)
+  if (match) {
+    const [, datePart, hh, mm] = match
+    const [y, m, d] = datePart.split('-').map(Number)
+    if (!hh) {
+      return new Date(y, m - 1, d, 23, 59, 0, 0)
+    }
+    if (hh === '00' && mm === '00') {
+      return new Date(y, m - 1, d, 23, 59, 0, 0)
+    }
+    return new Date(y, m - 1, d, Number(hh), Number(mm), 0, 0)
+  }
+
+  const normalized = text.includes('T') ? text : text.replace(' ', 'T')
+  const date = new Date(normalized)
+  if (!Number.isNaN(date.getTime())) return truncateToMinute(date)
+
+  const fallback = new Date(text.replace(/-/g, '/'))
+  return Number.isNaN(fallback.getTime()) ? null : truncateToMinute(fallback)
+}
+
+function truncateToMinute(date) {
+  return new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate(),
+      date.getHours(),
+      date.getMinutes(),
+      0,
+      0,
+  )
+}
+
+export function isHomeworkOverdue(value) {
+  const deadline = parseDeadline(value)
+  if (!deadline) return false
+  return Date.now() > deadline.getTime()
+}
+
+export function homeworkStatusLabel(value) {
+  return isHomeworkOverdue(value) ? '已截止' : '进行中'
+}
+
+/** 创建作业时规范化 deadline 字符串（存库用，含秒） */
+export function normalizeDeadlineInput(value) {
+  if (value == null || value === '') return value
+  let text = String(value).trim()
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(text)) {
+    return text.replace('T', ' ') + ':00'
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return `${text} 23:59:00`
+  }
+  text = text.replace(/\.\d+/, '').replace(/Z$/, '')
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/)
+  if (match) {
+    return `${match[1]} ${match[2]}:${match[3]}:00`
+  }
+  return text
+}
