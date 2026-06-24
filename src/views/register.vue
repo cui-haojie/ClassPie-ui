@@ -88,11 +88,9 @@ function validateField(field) {
     case 'mechanism':
       setError('mechanism', validateMechanism(form.mechanism, form.customMechanism));
       if (form.mechanism === '__other__') validateField('customMechanism');
-      selectedClassIds.value = [];
       break;
     case 'customMechanism':
       setError('customMechanism', validateMechanism(form.mechanism, form.customMechanism));
-      selectedClassIds.value = [];
       break;
     case 'status_number':
       setError('status_number', validateStudentId(form.status_number));
@@ -103,6 +101,16 @@ function validateField(field) {
     default:
       break;
   }
+}
+
+function onMechanismChange() {
+  validateField('mechanism');
+  selectedClassIds.value = [];
+}
+
+function onCustomMechanismInput() {
+  validateField('customMechanism');
+  selectedClassIds.value = [];
 }
 
 function validateAll() {
@@ -244,7 +252,7 @@ function create() {
           v-model="form.mechanism"
           class="input select-input"
           :class="{ 'input-invalid': errors.mechanism }"
-          @change="validateField('mechanism')"
+          @change="onMechanismChange"
       >
         <option value="">请选择学校/机构</option>
         <option v-for="item in institutionOptions" :key="item.value" :value="item.value">
@@ -260,6 +268,7 @@ function create() {
           placeholder="请输入学校/机构名称"
           class="input"
           :class="{ 'input-invalid': errors.customMechanism }"
+          @input="onCustomMechanismInput"
           @blur="validateField('customMechanism')"
       >
       <span
