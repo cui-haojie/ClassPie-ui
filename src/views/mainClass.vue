@@ -19,12 +19,33 @@ const unreadCount = ref(0);
 const subPageTitle = ref('');
 const parentCourseTitle = ref('');
 
-const navItems = computed(() => {
-  const items = [{ label: '我的课堂', name: 'mainInterface' }];
+
+const isHomeActive = computed(() => route.name === 'mainInterface');
+
+const headerCrumbs = computed(() => {
   if (route.name === 'userSetting') {
-    items.push({ label: '个人设置', name: 'userSetting' });
+    return [{ label: '个人设置', current: true }];
   }
-  return items;
+  if (route.name === 'courseContent') {
+    return [{ label: subPageTitle.value || '课程详情', current: true }];
+  }
+  if (route.name === 'homeworkContent') {
+    const items = [];
+    if (parentCourseTitle.value) {
+      items.push({ label: parentCourseTitle.value, action: goCourseFromBreadcrumb });
+    }
+    items.push({ label: subPageTitle.value || '作业详情', current: true });
+    return items;
+  }
+  if (route.name === 'activityContent') {
+    const items = [];
+    if (parentCourseTitle.value) {
+      items.push({ label: parentCourseTitle.value, action: goCourseFromBreadcrumb });
+    }
+    items.push({ label: subPageTitle.value || '活动详情', current: true });
+    return items;
+  }
+  return [];
 });
 
 function closePanels() {
@@ -41,13 +62,6 @@ function closeUserMenu() {
   showUserMenu.value = false;
 }
 
-function isNavActive(name) {
-  if (name === 'mainInterface') {
-    return ['mainInterface', 'courseContent', 'homeworkContent'].includes(route.name);
-  }
-  return route.name === name;
-}
-
 function goHome() {
   closePanels();
   if (route.name !== 'mainInterface') {
@@ -60,13 +74,6 @@ function goUserSetting() {
   router.push({ name: 'userSetting' });
 }
 
-function goNav(name) {
-  closePanels();
-  if (route.name !== name) {
-    router.push({ name });
-  }
-}
-
 function goCourseFromBreadcrumb() {
   closePanels();
   const classId = route.query.classId || route.query.id;
@@ -74,7 +81,11 @@ function goCourseFromBreadcrumb() {
     goHome();
     return;
   }
-  router.push({ name: 'courseContent', query: { id: classId } });
+  const query = { id: classId };
+  if (route.name === 'activityContent' && route.query.type) {
+    query.section = route.query.type;
+  }
+  router.push({ name: 'courseContent', query });
 }
 
 function logout() {
@@ -174,23 +185,32 @@ function loadSubPageTitles() {
             subPageTitle.value = '作业详情';
           });
     }
+    return;
+  }
+
+  if (route.name === 'activityContent') {
+    const classId = route.query.classId;
+    const activityId = route.params.id;
+    if (classId) {
+      request.post('/editor/getCourseById', { id: classId })
+          .then(res => {
+            parentCourseTitle.value = res?.class_name || '课程详情';
+          })
+          .catch(() => {
+            parentCourseTitle.value = '课程详情';
+          });
+    }
+    if (activityId) {
+      request.post('/editor/getCourseActivityById', { activity_id: Number(activityId) })
+          .then(res => {
+            subPageTitle.value = res?.title || '活动详情';
+          })
+          .catch(() => {
+            subPageTitle.value = '活动详情';
+          });
+    }
   }
 }
-
-const breadcrumbs = computed(() => {
-  if (route.name === 'courseContent') {
-    return [{ label: subPageTitle.value || '课程详情', current: true }];
-  }
-  if (route.name === 'homeworkContent') {
-    const items = [];
-    if (parentCourseTitle.value) {
-      items.push({ label: parentCourseTitle.value, action: goCourseFromBreadcrumb });
-    }
-    items.push({ label: subPageTitle.value || '作业详情', current: true });
-    return items;
-  }
-  return [];
-});
 
 watch(
     () => [route.name, route.query.id, route.query.classId, route.params.id],
@@ -218,87 +238,94 @@ function loadProfile() {
 
 <template>
   <div class="main-class-page">
-    <header class="leader">
-      <img
-          src="../assets/newClassPi.png"
-          class="logo"
-          alt="ClassPi"
-          @click="goHome"
-      >
-
-      <nav class="nav-tabs">
-        <button
-            v-for="item in navItems"
-            :key="item.name"
-            type="button"
-            class="nav-tab"
-            :class="{ active: isNavActive(item.name) }"
-            @click="goNav(item.name)"
-        >
-          {{ item.label }}
-        </button>
-      </nav>
-
-      <nav v-if="breadcrumbs.length" class="breadcrumb" aria-label="页面路径">
-        <template v-for="(crumb, index) in breadcrumbs" :key="index">
-          <span v-if="index > 0" class="breadcrumb-sep">/</span>
-          <button
-              v-if="crumb.action"
-              type="button"
-              class="breadcrumb-link"
-              @click="crumb.action"
-          >
-            {{ crumb.label }}
+    <header class="app-header">
+      <div class="header-inner">
+        <div class="header-left">
+          <button type="button" class="brand" @click="goHome" aria-label="返回我的课堂">
+            <img src="../assets/newClassPi.png" class="logo" alt="ClassPi">
           </button>
-          <span v-else class="breadcrumb-current">{{ crumb.label }}</span>
-        </template>
-      </nav>
 
-      <div class="leader-spacer"></div>
-
-      <div class="leader_container">
-        <div class="content content-muted" style="width: 80px">AI工具集</div>
-        <div class="content content-muted"><i class="iconfont icon-chazhong"></i>论文查重</div>
-        <div class="content content-muted"><i class="iconfont icon-renwubiao"></i>任务管理</div>
-        <div class="content notify-wrap" style="width: 30px;" @click="toggleNotifications">
-          <i class="iconfont icon-lingdang-xianxing"></i>
-          <span v-if="unreadCount > 0" class="notify-badge">{{ unreadCount }}</span>
+          <nav class="header-nav" aria-label="页面路径">
+            <button
+                type="button"
+                class="nav-crumb"
+                :class="{ active: isHomeActive }"
+                @click="goHome"
+            >
+              我的课堂
+            </button>
+            <template v-for="(crumb, index) in headerCrumbs" :key="index">
+              <span class="nav-sep" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <button
+                  v-if="crumb.action"
+                  type="button"
+                  class="nav-crumb link"
+                  @click="crumb.action"
+              >
+                {{ crumb.label }}
+              </button>
+              <span v-else class="nav-crumb current" :title="crumb.label">{{ crumb.label }}</span>
+            </template>
+          </nav>
         </div>
-        <div
-            class="avatar-menu-wrap"
-            :class="{ 'is-open': showUserMenu }"
-            @mouseenter="openUserMenu"
-            @mouseleave="closeUserMenu"
-        >
-          <div class="avatar-wrap">
-            <UserAvatar :avatar-url="avatarUrl" :name="name" :account="account" :size="40" />
-          </div>
-          <div v-show="showUserMenu" class="user-dropdown">
-            <ul class="user-dropdown-list">
-              <li>开通VIP</li>
-              <li>账号容量</li>
-              <li>机构用户认证</li>
-              <li @click="goUserSetting">个人设置</li>
-              <li @click="logout">退出登陆</li>
-            </ul>
-          </div>
-        </div>
-      </div>
 
-      <div v-if="showNotifications" class="notify-panel">
-        <div class="notify-title">消息通知</div>
-        <div v-if="notifications.length === 0" class="notify-empty">暂无通知</div>
-        <div
-            v-for="item in notifications"
-            :key="item.id"
-            class="notify-item"
-            :class="{ unread: !item.is_read, clickable: item.homework_id || item.class_id }"
-            @click="openNotification(item)"
-        >
-          <div>{{ item.message }}</div>
-          <div class="notify-time">
-            {{ formatDateTime(item.create_time) }}
-            <span v-if="item.homework_id" class="notify-link-hint">点击查看作业</span>
+        <div class="header-right">
+          <div class="notify-menu" :class="{ open: showNotifications }">
+            <button
+                type="button"
+                class="header-icon-btn"
+                :class="{ active: showNotifications }"
+                aria-label="消息通知"
+                @click="toggleNotifications"
+            >
+              <i class="iconfont icon-lingdang-xianxing"></i>
+              <span v-if="unreadCount > 0" class="notify-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+            </button>
+            <div v-if="showNotifications" class="notify-panel">
+              <div class="notify-title">消息通知</div>
+              <div v-if="notifications.length === 0" class="notify-empty">暂无通知</div>
+              <div
+                  v-for="item in notifications"
+                  :key="item.id"
+                  class="notify-item"
+                  :class="{ unread: !item.is_read, clickable: item.homework_id || item.class_id }"
+                  @click="openNotification(item)"
+              >
+                <div>{{ item.message }}</div>
+                <div class="notify-time">
+                  {{ formatDateTime(item.create_time) }}
+                  <span v-if="item.homework_id" class="notify-link-hint">点击查看作业</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+              class="user-menu"
+              :class="{ open: showUserMenu }"
+              @mouseenter="openUserMenu"
+              @mouseleave="closeUserMenu"
+          >
+            <button type="button" class="user-trigger" @click="goUserSetting">
+              <UserAvatar :avatar-url="avatarUrl" :name="name" :account="account" :size="42" />
+              <span class="user-label">{{ name || '用户' }}</span>
+              <svg class="user-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div v-show="showUserMenu" class="user-dropdown">
+              <div class="dropdown-header">
+                <UserAvatar :avatar-url="avatarUrl" :name="name" :account="account" :size="40" />
+                <div class="dropdown-user-meta">
+                  <div class="dropdown-name">{{ name || '未设置姓名' }}</div>
+                  <div class="dropdown-account">{{ account }}</div>
+                </div>
+              </div>
+              <ul class="user-dropdown-list">
+                <li @click="goUserSetting">个人设置</li>
+                <li class="danger" @click="logout">退出登录</li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>
@@ -311,173 +338,332 @@ function loadProfile() {
 </template>
 
 <style scoped>
-.logo {
-  height: 37px;
-  width: 147px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
 .main-class-page {
-  background-color: #FFFFFF;
   min-height: 100vh;
+  background: #f4f6f9;
 }
 
 .main-content {
-  padding-top: 83px;
+  padding-top: 76px;
 }
 
-.leader-spacer {
-  flex: 1;
-  min-width: 12px;
+.app-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  height: 76px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid #e8ecf1;
 }
 
-.nav-tabs {
+.header-inner {
+  max-width: 1280px;
+  height: 100%;
+  margin: 0 auto;
+  padding: 0 24px;
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-left: 28px;
-  flex-shrink: 0;
+  justify-content: space-between;
+  gap: 20px;
 }
 
-.nav-tab {
-  height: 83px;
-  padding: 0 18px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: none;
-  font: 500 20px/83px Roboto, Helvetica, Arial, sans-serif;
-  color: #303133;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: color 0.2s, border-color 0.2s;
-}
-
-.nav-tab:hover {
-  color: rgb(72, 138, 248);
-}
-
-.nav-tab.active {
-  color: rgb(72, 138, 248);
-  border-bottom-color: rgb(72, 138, 248);
-}
-
-.breadcrumb {
+.header-left {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-left: 20px;
+  gap: 20px;
   min-width: 0;
-  max-width: 360px;
-  overflow: hidden;
-  flex-shrink: 1;
+  flex: 1;
 }
 
-.breadcrumb-sep {
-  color: #c0c4cc;
-  font-size: 14px;
-}
-
-.breadcrumb-link {
+.brand {
   border: none;
   background: none;
   padding: 0;
-  font-size: 15px;
-  color: rgb(72, 138, 248);
   cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 160px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
 
-.breadcrumb-link:hover {
-  text-decoration: underline;
-}
-
-.breadcrumb-current {
-  font-size: 15px;
-  color: #606266;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 180px;
-}
-
-.avatar-menu-wrap {
-  position: relative;
-  top: 15px;
-  align-self: flex-start;
-}
-
-.avatar-menu-wrap.is-open::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  top: 47px;
-  width: 130px;
-  height: 10px;
-}
-
-.avatar-wrap {
-  cursor: pointer;
-}
-
-.avatar-img {
-  width: 47px;
-  height: 47px;
-  border-radius: 50%;
+.logo {
+  height: 38px;
+  width: auto;
   display: block;
 }
 
-.notify-wrap {
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.nav-sep {
+  display: flex;
+  align-items: center;
+  color: #cbd5e1;
+  flex-shrink: 0;
+}
+
+.nav-sep svg {
+  width: 18px;
+  height: 18px;
+}
+
+.nav-crumb {
+  border: none;
+  background: none;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 18px;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.nav-crumb.link {
+  color: #4285f4;
+}
+
+.nav-crumb.link:hover {
+  background: #eff6ff;
+}
+
+.nav-crumb.active {
+  color: #1e293b;
+  background: #f1f5f9;
+}
+
+.nav-crumb.current {
+  color: #1e293b;
+  font-weight: 600;
+  font-size: 18px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.notify-menu {
   position: relative;
+}
+
+.notify-menu.open::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 10px;
+}
+
+.header-icon-btn {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #64748b;
+  font-size: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.header-icon-btn:hover,
+.header-icon-btn.active {
+  background: #f1f5f9;
+  color: #4285f4;
 }
 
 .notify-badge {
   position: absolute;
-  top: 18px;
-  right: -6px;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 4px;
-  border-radius: 9px;
-  background: #f56c6c;
+  top: 4px;
+  right: 4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #ef4444;
   color: #fff;
   font-size: 12px;
-  line-height: 18px;
+  font-weight: 600;
+  line-height: 16px;
   text-align: center;
+  border: 2px solid #fff;
+}
+
+.user-menu {
+  position: relative;
+}
+
+.user-menu.open::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 100%;
+  width: 220px;
+  height: 8px;
+}
+
+.user-trigger {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 14px 6px 6px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.user-trigger:hover,
+.user-menu.open .user-trigger {
+  background: #f8fafc;
+  border-color: #e8ecf1;
+}
+
+.user-label {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 17px;
+  font-weight: 500;
+  color: #334155;
+}
+
+.user-chevron {
+  color: #94a3b8;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+}
+
+.user-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  width: 260px;
+  background: #fff;
+  border: 1px solid #e8ecf1;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+  z-index: 30;
+  overflow: hidden;
+}
+
+.dropdown-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.dropdown-user-meta {
+  min-width: 0;
+}
+
+.dropdown-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dropdown-account {
+  margin-top: 2px;
+  font-size: 14px;
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-dropdown-list {
+  margin: 0;
+  padding: 8px;
+  list-style: none;
+}
+
+.user-dropdown-list li {
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-size: 16px;
+  color: #475569;
+  cursor: pointer;
+  line-height: 1.4;
+  width: auto;
+  height: auto;
+  margin: 0;
+}
+
+.user-dropdown-list li:hover {
+  background: #f8fafc;
+  color: #4285f4;
+}
+
+.user-dropdown-list li.danger:hover {
+  background: #fef2f2;
+  color: #dc2626;
 }
 
 .notify-panel {
   position: absolute;
-  right: 70px;
-  top: 55px;
-  width: 320px;
-  max-height: 420px;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 360px;
+  max-height: min(420px, calc(100vh - 96px));
   overflow-y: auto;
   background: #fff;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  border-radius: 8px;
-  z-index: 25;
+  border: 1px solid #e8ecf1;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+  z-index: 120;
   padding: 12px 0;
 }
 
 .notify-title {
   font-weight: 600;
-  padding: 0 16px 12px;
-  border-bottom: 1px solid #eee;
+  font-size: 17px;
+  color: #1e293b;
+  padding: 4px 16px 12px;
+  border-bottom: 1px solid #f1f5f9;
 }
 
 .notify-empty {
-  padding: 24px 16px;
-  color: #999;
+  padding: 32px 16px;
+  color: #94a3b8;
+  text-align: center;
+  font-size: 16px;
 }
 
 .notify-item {
-  padding: 12px 16px;
+  padding: 14px 16px;
   cursor: pointer;
-  border-bottom: 1px solid #f5f5f5;
+  border-bottom: 1px solid #f8fafc;
+  font-size: 16px;
+  color: #334155;
 }
 
 .notify-item.unread {
@@ -485,99 +671,44 @@ function loadProfile() {
 }
 
 .notify-item.clickable:hover {
-  background: #eef2ff;
+  background: #f8fafc;
 }
 
 .notify-link-hint {
   margin-left: 8px;
-  color: rgb(72, 138, 248);
+  color: #4285f4;
+  font-size: 14px;
 }
 
 .notify-time {
-  font-size: 12px;
-  color: #999;
+  font-size: 14px;
+  color: #94a3b8;
   margin-top: 4px;
 }
 
-.user-dropdown {
-  width: 130px;
-  padding: 12px;
-  position: absolute;
-  right: 0;
-  top: 57px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
-  background-color: #FFFFFF;
-  z-index: 20;
-  border-radius: 4px;
-}
-
-.user-dropdown-list {
-  font-size: 14px;
-  color: rgb(108, 110, 113);
-  margin: 0;
-  padding: 0;
-}
-
-.leader {
-  display: flex;
-  width: 100%;
-  height: 83px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
-  align-items: center;
-  position: fixed;
-  z-index: 10;
-  background-color: white;
-  top: 0;
-  left: 0;
-  right: 0;
-  padding: 0 calc(30px + 15px) 0 30px;
-}
-
-.leader_container {
-  font-family: Roboto, Helvetica, Arial, sans-serif;
-  height: 83px;
-  font-size: 20px;
-  line-height: 83px;
-  display: flex;
-  flex-shrink: 0;
-}
-
-.content {
-  margin-right: 15px;
-  cursor: pointer;
-  width: 100px;
-}
-
-.content-muted {
-  color: #909399;
-  cursor: default;
-}
-
-.content:not(.content-muted):hover {
-  color: rgb(72, 138, 248);
-}
-
-li {
-  list-style-type: none;
-  padding: 0 20px 0 12px;
-  margin: 0 -12px;
-  width: 128px;
-  height: 30px;
-  cursor: pointer;
-  line-height: 30px;
-}
-
-li:hover {
-  background-color: rgb(232, 240, 255);
-}
-
-@media (max-width: 1100px) {
-  .content.content-muted {
+@media (max-width: 900px) {
+  .user-label,
+  .user-chevron {
     display: none;
   }
 
-  .breadcrumb {
-    max-width: 200px;
+  .nav-crumb.current {
+    max-width: 160px;
+  }
+
+  .header-inner {
+    padding: 0 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .notify-panel {
+    width: min(360px, calc(100vw - 32px));
+    right: -8px;
+  }
+
+  .header-nav .nav-crumb:not(.current):not(.active):not(.link) {
+    display: none;
   }
 }
 </style>

@@ -427,9 +427,9 @@ function remindSubmit() {
 
 <style scoped>
 #body {
-  width: 1469px;
+  width: min(1200px, calc(100vw - 48px));
   margin: auto;
-  padding-top: 110px;
+  padding: 24px 0 48px;
 }
 
 .title_container {

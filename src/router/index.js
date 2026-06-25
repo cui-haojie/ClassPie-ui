@@ -10,6 +10,7 @@ import userSetting from "@/views/userSetting.vue"
 import teacherClass from "@/views/teacherClass.vue";
 import courseContent from "@/views/courseContent.vue";
 import homeworkContent from "@/views/HomeworkContent.vue";
+import ActivityContent from "@/views/ActivityContent.vue";
 import {useAccountStore} from "@/stores/account.js";
 import {unlockBodyScroll} from '@/utils/scrollLock.js';
 
@@ -54,6 +55,11 @@ const router = createRouter({
               path:'/homeworkContent/:id',
               name: 'homeworkContent',
               component: homeworkContent,
+          },
+          {
+              path:'/activityContent/:id',
+              name: 'activityContent',
+              component: ActivityContent,
           }
       ]},
         {

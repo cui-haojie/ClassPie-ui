@@ -9,6 +9,7 @@ import {SEMESTER_OPTIONS, formatSemester} from '@/constants/semesters.js';
 import AppModal from '@/components/AppModal.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import {formatDateTime, formatDeadline, homeworkStatusLabel, isHomeworkOverdue, normalizeDeadlineInput} from '@/utils/homeworkDeadline.js';
+import { parseClassTimeSlots } from '@/utils/courseSchedule.js';
 
 /**
  * @typedef {Object} Homework
@@ -51,8 +52,6 @@ const activeSection = ref('interaction')
 const showEditCourse = ref(false)
 const showHomeworkModal = ref(false)
 const showActivityModal = ref(false)
-const showActivityDetail = ref(false)
-const selectedActivity = ref(null)
 const activityForm = ref({ title: '', content: '', deadline: '', attachment_url: '', attachment_name: '' })
 const currentActivityType = ref('interaction')
 const activities = ref({
@@ -96,6 +95,7 @@ const sectionCountLabel = computed(() => {
 })
 
 const isActivitySection = computed(() => !!activeTabMeta.value.type)
+const classTimeSlots = computed(() => parseClassTimeSlots(class_time.value))
 const editForm = ref({ class_name: '', class_time: '', selected_classes: '', semester: '' })
 const semesterOptions = SEMESTER_OPTIONS
 
@@ -368,19 +368,24 @@ function confirmActivity() {
 }
 
 function openActivityDetail(item) {
-  selectedActivity.value = item
-  showActivityDetail.value = true
+  const activityId = item?.id ?? item?.activity_id;
+  if (!activityId) {
+    toast.error('活动数据异常，无法打开');
+    return;
+  }
+  router.push({
+    name: 'activityContent',
+    params: { id: String(activityId) },
+    query: { classId: course_id.value, type: item.type },
+    state: { activity: item },
+  }).catch(() => {});
 }
 
-function activityTypeLabel(type) {
-  const map = {
-    interaction: '课程互动',
-    topic: '话题',
-    material: '资料',
-    test: '测试',
-    announcement: '公告',
-  }
-  return map[type] || type
+function replyCountLabel(item) {
+  const count = item.reply_count ?? 0;
+  const type = item.type || activeTabMeta.value.type;
+  if (type === 'test') return `${count} 人已提交`;
+  return `${count} 条讨论`;
 }
 
 watch(activeSection, (key) => {
@@ -426,39 +431,6 @@ loadAllActivities()
     <template #footer>
       <button type="button" class="btn-ghost" @click="showActivityModal=false">取消</button>
       <button type="button" class="btn-primary" @click="confirmActivity">确认发布</button>
-    </template>
-  </AppModal>
-
-  <AppModal
-      v-model="showActivityDetail"
-      :title="selectedActivity?.title || '详情'"
-      :subtitle="activityTypeLabel(selectedActivity?.type)"
-      size="lg"
-  >
-    <div v-if="selectedActivity" class="activity-detail">
-      <div class="detail-meta">
-        <span>{{ selectedActivity.creator_name || selectedActivity.creator_account }}</span>
-        <span>{{ formatDateTime(selectedActivity.create_time) }}</span>
-      </div>
-      <div v-if="selectedActivity.deadline" class="detail-deadline">
-        截止时间：{{ formatDeadline(selectedActivity.deadline) }}
-        <span :class="{ 'status-overdue': isHomeworkOverdue(selectedActivity.deadline) }">
-          | {{ homeworkStatusLabel(selectedActivity.deadline) }}
-        </span>
-      </div>
-      <div class="detail-content">{{ selectedActivity.content || '暂无内容' }}</div>
-      <a
-          v-if="selectedActivity.attachment_url"
-          :href="selectedActivity.attachment_url"
-          target="_blank"
-          rel="noopener"
-          class="detail-link"
-      >
-        {{ selectedActivity.attachment_name || '查看资料' }}
-      </a>
-    </div>
-    <template #footer>
-      <button type="button" class="btn-primary" @click="showActivityDetail=false">关闭</button>
     </template>
   </AppModal>
 
@@ -513,7 +485,11 @@ loadAllActivities()
       </label>
       <label class="form-field">
         <span class="field-label">上课时间</span>
-        <input v-model="editForm.class_time" placeholder="上课时间" class="field-control"/>
+        <textarea
+            v-model="editForm.class_time"
+            class="field-control field-textarea schedule-input"
+            placeholder="可填多个时段，用顿号或换行分隔&#10;例如：周一 1-2 节、周三 3-4 节、周五 5-6 节"
+        ></textarea>
       </label>
       <label class="form-field">
         <span class="field-label">教学班级</span>
@@ -536,7 +512,16 @@ loadAllActivities()
           <div class="course-meta">
             <span class="meta-chip"><i class="iconfont icon-erweima"/> 加课码 {{ code }}</span>
             <span class="meta-chip">{{ count }} 人已加入</span>
-            <span v-if="class_time" class="meta-chip">{{ class_time }}</span>
+            <template v-if="classTimeSlots.length">
+              <span class="meta-chip meta-chip-label">上课时间</span>
+              <span
+                  v-for="(slot, index) in classTimeSlots"
+                  :key="`${slot}-${index}`"
+                  class="meta-chip meta-chip-schedule"
+              >
+                {{ slot }}
+              </span>
+            </template>
           </div>
         </div>
         <button
@@ -639,7 +624,10 @@ loadAllActivities()
                   </template>
                 </div>
                 <div v-if="item.content" class="activity-preview">{{ item.content }}</div>
-                <div v-if="item.attachment_url" class="activity-attachment">📎 {{ item.attachment_name || '附件' }}</div>
+                <div class="activity-footer">
+                  <span class="reply-count">{{ replyCountLabel(item) }}</span>
+                  <span v-if="item.attachment_url" class="activity-attachment">📎 {{ item.attachment_name || '附件' }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -654,10 +642,24 @@ loadAllActivities()
 </template>
 
 <style scoped>
+.meta-chip-schedule {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.meta-chip-label {
+  background: rgba(255, 255, 255, 0.28);
+  font-weight: 600;
+}
+
+.schedule-input {
+  min-height: 88px;
+  resize: vertical;
+}
+
 .course-page {
   width: min(1200px, calc(100vw - 48px));
   margin: 0 auto;
-  padding: 88px 0 48px;
+  padding: 24px 0 48px;
 }
 
 .course-hero-card {
@@ -1022,9 +1024,24 @@ loadAllActivities()
 }
 
 .activity-attachment {
-  margin-top: 6px;
   font-size: 13px;
   color: #4285f4;
+}
+
+.activity-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.reply-count {
+  font-size: 13px;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 3px 10px;
+  border-radius: 999px;
 }
 
 .empty-panel {

@@ -678,8 +678,12 @@ function restoreCourse(courseId) {
           </select>
         </label>
         <label class="form-field">
-          <span class="field-label">课程时间</span>
-          <input v-model="createForm.class_time" type="text" class="field-control" placeholder="例如：周一 1-2 节">
+          <span class="field-label">上课时间</span>
+          <textarea
+              v-model="createForm.class_time"
+              class="field-control schedule-textarea"
+              placeholder="可填多个时段，用顿号或换行分隔&#10;例如：周一 1-2 节、周三 3-4 节"
+          ></textarea>
         </label>
         <label class="form-field form-field-full">
           <span class="field-label">教学班级展示名</span>
@@ -1174,6 +1178,14 @@ function restoreCourse(courseId) {
   outline: none;
   border-color: rgb(72, 138, 248);
   box-shadow: 0 0 0 3px rgba(72, 138, 248, 0.12);
+}
+
+.schedule-textarea {
+  height: auto;
+  min-height: 72px;
+  padding: 10px 12px;
+  line-height: 1.5;
+  resize: vertical;
 }
 
 .field-select {
