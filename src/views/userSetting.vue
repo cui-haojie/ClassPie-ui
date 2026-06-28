@@ -927,30 +927,13 @@ li.row-editing .right {
 }
 
 .inline-input {
-  width: 100%;
+  max-width: 420px;
   height: 40px;
-  padding: 0 12px;
-  border: 1px solid rgb(218, 220, 224);
-  border-radius: 6px;
   font-size: 15px;
-  color: #303133;
-  box-sizing: border-box;
-  background: #fff;
 }
 
-.inline-input:focus {
-  outline: none;
-  border-color: rgb(72, 138, 248);
-  box-shadow: 0 0 0 3px rgba(72, 138, 248, 0.12);
-}
-
-.inline-input.input-invalid {
-  border-color: #f56c6c;
-}
-
-.inline-input.input-invalid:focus {
-  border-color: #f56c6c;
-  box-shadow: 0 0 0 3px rgba(245, 108, 108, 0.12);
+.inline-select {
+  cursor: pointer;
 }
 
 .inline-select {

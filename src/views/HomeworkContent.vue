@@ -306,6 +306,12 @@ function remindSubmit() {
         </div>
         <div v-if="homework.details" class="homework-desc">{{ homework.details }}</div>
         <div v-else class="homework-desc muted">暂无作业说明</div>
+        <div v-if="homework.attachment_url" class="attachment-row teacher-attachment">
+          <span>教师附件：</span>
+          <a :href="resolveAttachmentUrl(homework.attachment_url)" target="_blank" rel="noopener">
+            {{ homework.attachment_name || '下载附件' }}
+          </a>
+        </div>
       </div>
     </div>
 
@@ -322,6 +328,12 @@ function remindSubmit() {
           </div>
           <div v-if="homework.details" class="homework-desc">{{ homework.details }}</div>
           <div v-else class="homework-desc muted">暂无作业说明</div>
+          <div v-if="homework.attachment_url" class="attachment-row teacher-attachment">
+            <span>教师附件：</span>
+            <a :href="resolveAttachmentUrl(homework.attachment_url)" target="_blank" rel="noopener">
+              {{ homework.attachment_name || '下载附件' }}
+            </a>
+          </div>
         </div>
       </div>
 
@@ -711,6 +723,12 @@ function remindSubmit() {
 .attachment-row {
   margin-top: 12px;
   font-size: 14px;
+}
+
+.teacher-attachment {
+  padding: 10px 12px;
+  background: #f8fafc;
+  border-radius: 8px;
 }
 
 .attachment-row a {

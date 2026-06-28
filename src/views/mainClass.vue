@@ -6,6 +6,22 @@ import {computed, onMounted, ref, watch} from "vue";
 import request from "@/utils/request.js";
 import UserAvatar from '@/components/UserAvatar.vue';
 import {formatDateTime} from '@/utils/homeworkDeadline.js';
+import {toast} from '@/utils/toast.js';
+
+const NOTIFY_TYPE_META = {
+  homework: { label: '作业', icon: '作' },
+  remind: { label: '催交', icon: '催' },
+  announcement: { label: '公告', icon: '告' },
+  test: { label: '测试', icon: '测' },
+};
+
+function isNotificationUnread(item) {
+  return !item?.is_read || item.is_read === 0;
+}
+
+function notificationTypeMeta(item) {
+  return NOTIFY_TYPE_META[item?.type] || { label: '通知', icon: '讯' };
+}
 
 const accountStore = useAccountStore();
 const {account, avatarUrl, name} = storeToRefs(accountStore);
@@ -18,6 +34,10 @@ const notifications = ref([]);
 const unreadCount = ref(0);
 const subPageTitle = ref('');
 const parentCourseTitle = ref('');
+
+const hasUnreadNotifications = computed(() =>
+    notifications.value.some(item => isNotificationUnread(item))
+);
 
 
 const isHomeActive = computed(() => route.name === 'mainInterface');
@@ -43,6 +63,22 @@ const headerCrumbs = computed(() => {
       items.push({ label: parentCourseTitle.value, action: goCourseFromBreadcrumb });
     }
     items.push({ label: subPageTitle.value || '活动详情', current: true });
+    return items;
+  }
+  if (route.name === 'testContent') {
+    const items = [];
+    if (parentCourseTitle.value) {
+      items.push({ label: parentCourseTitle.value, action: goCourseFromBreadcrumb });
+    }
+    items.push({ label: subPageTitle.value || '测试答题', current: true });
+    return items;
+  }
+  if (route.name === 'testEditor') {
+    const items = [];
+    if (parentCourseTitle.value) {
+      items.push({ label: parentCourseTitle.value, action: goCourseFromBreadcrumb });
+    }
+    items.push({ label: subPageTitle.value || '编辑测试', current: true });
     return items;
   }
   return [];
@@ -85,6 +121,12 @@ function goCourseFromBreadcrumb() {
   if (route.name === 'activityContent' && route.query.type) {
     query.section = route.query.type;
   }
+  if (route.name === 'testContent') {
+    query.section = 'test';
+  }
+  if (route.name === 'testEditor') {
+    query.section = 'test';
+  }
   router.push({ name: 'courseContent', query });
 }
 
@@ -113,16 +155,41 @@ function toggleNotifications() {
   }
 }
 
-function readNotification(item) {
-  request.put('/editor/readNotification', { id: item.id, account: account.value })
-      .then(() => {
-        item.is_read = true;
-        loadNotificationCount();
+function readNotification(item, options = {}) {
+  const { silent = false } = options;
+  if (!item?.id || !isNotificationUnread(item)) return Promise.resolve(true);
+  return request.put('/editor/readNotification', { id: item.id, account: account.value })
+      .then(ok => {
+        if (ok) {
+          item.is_read = 1;
+          loadNotificationCount();
+          if (!silent) toast.success('已标记为已读');
+        }
+        return ok;
+      })
+      .catch(() => {
+        toast.error('标记已读失败');
+        return false;
       });
 }
 
+function markAllNotificationsRead() {
+  if (!hasUnreadNotifications.value) return;
+  request.put('/editor/readAllNotifications', { account: account.value })
+      .then(ok => {
+        if (ok) {
+          notifications.value.forEach(item => { item.is_read = 1; });
+          unreadCount.value = 0;
+          toast.success('已全部标记为已读');
+        } else {
+          toast.error('操作失败');
+        }
+      })
+      .catch(() => toast.error('操作失败'));
+}
+
 function openNotification(item) {
-  readNotification(item);
+  readNotification(item, { silent: true });
   if (item.homework_id && item.class_id) {
     closePanels();
     const target = {
@@ -144,6 +211,9 @@ function openNotification(item) {
     const query = { id: String(item.class_id) };
     if (item.type === 'announcement') {
       query.section = 'announcement';
+    }
+    if (item.type === 'test') {
+      query.section = 'test';
     }
     router.push({ name: 'courseContent', query });
   }
@@ -207,6 +277,54 @@ function loadSubPageTitles() {
           })
           .catch(() => {
             subPageTitle.value = '活动详情';
+          });
+    }
+    return;
+  }
+
+  if (route.name === 'testContent') {
+    const classId = route.query.classId;
+    const activityId = route.params.id;
+    if (classId) {
+      request.post('/editor/getCourseById', { id: classId })
+          .then(res => {
+            parentCourseTitle.value = res?.class_name || '课程详情';
+          })
+          .catch(() => {
+            parentCourseTitle.value = '课程详情';
+          });
+    }
+    if (activityId) {
+      request.post('/editor/getCourseActivityById', { activity_id: Number(activityId) })
+          .then(res => {
+            subPageTitle.value = res?.title || '测试答题';
+          })
+          .catch(() => {
+            subPageTitle.value = '测试答题';
+          });
+    }
+    return;
+  }
+
+  if (route.name === 'testEditor') {
+    const classId = route.query.classId;
+    const activityId = route.params.id;
+    if (classId) {
+      request.post('/editor/getCourseById', { id: classId })
+          .then(res => {
+            parentCourseTitle.value = res?.class_name || '课程详情';
+          })
+          .catch(() => {
+            parentCourseTitle.value = '课程详情';
+          });
+    }
+    if (activityId) {
+      request.post('/editor/getCourseActivityById', { activity_id: Number(activityId) })
+          .then(res => {
+            subPageTitle.value = res?.title || '编辑测试';
+          })
+          .catch(() => {
+            subPageTitle.value = '编辑测试';
           });
     }
   }
@@ -284,19 +402,64 @@ function loadProfile() {
               <span v-if="unreadCount > 0" class="notify-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
             </button>
             <div v-if="showNotifications" class="notify-panel">
-              <div class="notify-title">消息通知</div>
+              <div class="notify-header">
+                <div class="notify-header-main">
+                  <span class="notify-title">消息通知</span>
+                  <span v-if="unreadCount > 0" class="notify-unread-tag">{{ unreadCount }} 条未读</span>
+                </div>
+                <button
+                    v-if="hasUnreadNotifications"
+                    type="button"
+                    class="notify-read-all"
+                    @click="markAllNotificationsRead"
+                >
+                  一键已读
+                </button>
+              </div>
               <div v-if="notifications.length === 0" class="notify-empty">暂无通知</div>
               <div
                   v-for="item in notifications"
                   :key="item.id"
                   class="notify-item"
-                  :class="{ unread: !item.is_read, clickable: item.homework_id || item.class_id }"
-                  @click="openNotification(item)"
+                  :class="{ unread: isNotificationUnread(item) }"
               >
-                <div>{{ item.message }}</div>
-                <div class="notify-time">
-                  {{ formatDateTime(item.create_time) }}
-                  <span v-if="item.homework_id" class="notify-link-hint">点击查看作业</span>
+                <div
+                    class="notify-item-main"
+                    :class="{ clickable: item.homework_id || item.class_id }"
+                    @click="openNotification(item)"
+                >
+                  <div class="notify-item-top">
+                    <span class="notify-type-badge" :class="`notify-type-${item.type || 'default'}`">
+                      {{ notificationTypeMeta(item).icon }}
+                    </span>
+                    <span class="notify-type-label">{{ notificationTypeMeta(item).label }}</span>
+                    <span v-if="isNotificationUnread(item)" class="notify-dot" aria-label="未读"></span>
+                  </div>
+                  <div class="notify-message">{{ item.message }}</div>
+                  <div class="notify-time">
+                    {{ formatDateTime(item.create_time) }}
+                    <span v-if="item.homework_id" class="notify-link-hint">点击查看作业</span>
+                    <span v-else-if="item.class_id && item.type === 'announcement'" class="notify-link-hint">点击查看公告</span>
+                    <span v-else-if="item.class_id && item.type === 'test'" class="notify-link-hint">点击进入测试</span>
+                  </div>
+                </div>
+                <div class="notify-item-actions">
+                  <button
+                      v-if="isNotificationUnread(item)"
+                      type="button"
+                      class="notify-action-btn"
+                      @click.stop="readNotification(item)"
+                  >
+                    标记已读
+                  </button>
+                  <button
+                      v-if="item.homework_id || item.class_id"
+                      type="button"
+                      class="notify-action-btn primary"
+                      @click.stop="openNotification(item)"
+                  >
+                    查看
+                  </button>
                 </div>
               </div>
             </div>
@@ -632,58 +795,185 @@ function loadProfile() {
   position: absolute;
   right: 0;
   top: calc(100% + 8px);
-  width: 360px;
-  max-height: min(420px, calc(100vh - 96px));
+  width: 380px;
+  max-height: min(480px, calc(100vh - 96px));
   overflow-y: auto;
   background: #fff;
   border: 1px solid #e8ecf1;
   border-radius: 12px;
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
   z-index: 120;
-  padding: 12px 0;
+}
+
+.notify-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+}
+
+.notify-header-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .notify-title {
   font-weight: 600;
-  font-size: 17px;
+  font-size: 16px;
   color: #1e293b;
-  padding: 4px 16px 12px;
-  border-bottom: 1px solid #f1f5f9;
+}
+
+.notify-unread-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fef2f2;
+  color: #ef4444;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.notify-read-all {
+  border: none;
+  background: none;
+  color: #4285f4;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 0;
+  white-space: nowrap;
+}
+
+.notify-read-all:hover {
+  text-decoration: underline;
 }
 
 .notify-empty {
-  padding: 32px 16px;
+  padding: 40px 16px;
   color: #94a3b8;
   text-align: center;
-  font-size: 16px;
+  font-size: 14px;
 }
 
 .notify-item {
-  padding: 14px 16px;
-  cursor: pointer;
-  border-bottom: 1px solid #f8fafc;
-  font-size: 16px;
-  color: #334155;
+  padding: 12px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  transition: background 0.15s;
+}
+
+.notify-item:last-child {
+  border-bottom: none;
 }
 
 .notify-item.unread {
-  background: #f0f7ff;
+  background: #f8fbff;
 }
 
-.notify-item.clickable:hover {
-  background: #f8fafc;
+.notify-item-main.clickable {
+  cursor: pointer;
+}
+
+.notify-item-main.clickable:hover .notify-message {
+  color: #4285f4;
+}
+
+.notify-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.notify-type-badge {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.notify-type-homework { background: #4285f4; }
+.notify-type-remind { background: #f59e0b; }
+.notify-type-test { background: #ef4444; }
+.notify-type-announcement { background: #10b981; }
+.notify-type-default { background: #94a3b8; }
+
+.notify-type-label {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.notify-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.notify-message {
+  font-size: 14px;
+  line-height: 1.55;
+  color: #334155;
+  margin-bottom: 6px;
 }
 
 .notify-link-hint {
   margin-left: 8px;
   color: #4285f4;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .notify-time {
-  font-size: 14px;
+  font-size: 12px;
   color: #94a3b8;
-  margin-top: 4px;
+}
+
+.notify-item-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.notify-action-btn {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #64748b;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.notify-action-btn:hover {
+  background: #f8fafc;
+  color: #334155;
+}
+
+.notify-action-btn.primary {
+  border-color: #4285f4;
+  color: #4285f4;
+}
+
+.notify-action-btn.primary:hover {
+  background: #eff6ff;
 }
 
 @media (max-width: 900px) {

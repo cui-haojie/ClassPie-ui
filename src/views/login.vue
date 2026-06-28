@@ -249,33 +249,27 @@ function wechatM() {
 }
 
 .input {
-  height: 60px;
-  width: 100%;
+  height: 52px;
   max-width: 490px;
-  padding: 4px 15px;
-  margin-top: 25px;
-  border: 1px solid rgb(218, 220, 224);
-  border-radius: 7px;
-  font-size: 17px;
-  box-sizing: border-box;
+  margin-top: 20px;
+  font-size: 16px;
 }
 
 .input-invalid {
-  border-color: #f56c6c;
+  border-color: #f87171 !important;
+  background: #fef2f2 !important;
 }
 
 input:focus {
   outline: none;
-  border-color: rgb(72, 138, 248);
 }
 
 .input-invalid:focus {
-  border-color: #f56c6c;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12) !important;
 }
 
 input::placeholder {
-  color: rgb(192, 196, 207);
-  font-size: 17px;
+  font-size: 15px;
 }
 
 .error-message {

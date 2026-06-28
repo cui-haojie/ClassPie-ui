@@ -11,6 +11,11 @@ export function resolveAttachmentUrl(url) {
   return resolveAvatarUrl(url)
 }
 
+export function isImageAttachment(url, name) {
+  const ref = (name || url || '').toLowerCase()
+  return /\.(jpg|jpeg|png|gif|webp)(\?.*)?$/.test(ref)
+}
+
 export function avatarInitial(name, account) {
   const source = (name || account || '?').trim()
   return source.charAt(0).toUpperCase()

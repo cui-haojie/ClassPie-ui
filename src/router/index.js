@@ -11,6 +11,8 @@ import teacherClass from "@/views/teacherClass.vue";
 import courseContent from "@/views/courseContent.vue";
 import homeworkContent from "@/views/HomeworkContent.vue";
 import ActivityContent from "@/views/ActivityContent.vue";
+import TestContent from "@/views/TestContent.vue";
+import TestEditor from "@/views/TestEditor.vue";
 import {useAccountStore} from "@/stores/account.js";
 import {unlockBodyScroll} from '@/utils/scrollLock.js';
 
@@ -60,6 +62,16 @@ const router = createRouter({
               path:'/activityContent/:id',
               name: 'activityContent',
               component: ActivityContent,
+          },
+          {
+              path:'/testContent/:id',
+              name: 'testContent',
+              component: TestContent,
+          },
+          {
+              path:'/testEditor/:id',
+              name: 'testEditor',
+              component: TestEditor,
           }
       ]},
         {

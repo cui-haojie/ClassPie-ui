@@ -99,6 +99,24 @@ export function homeworkStatusLabel(value) {
   return isHomeworkOverdue(value) ? '已截止' : '进行中'
 }
 
+export function isBeforeStart(value) {
+  const start = parseDeadline(value)
+  if (!start) return false
+  return Date.now() < start.getTime()
+}
+
+export function testStatusLabel(startTime, endTime) {
+  if (startTime && isBeforeStart(startTime)) return '未开始'
+  if (endTime && isHomeworkOverdue(endTime)) return '已结束'
+  return '进行中'
+}
+
+export function canTakeTest(startTime, endTime) {
+  if (startTime && isBeforeStart(startTime)) return false
+  if (endTime && isHomeworkOverdue(endTime)) return false
+  return true
+}
+
 /** 创建作业时规范化 deadline 字符串（存库用，含秒） */
 export function normalizeDeadlineInput(value) {
   if (value == null || value === '') return value
@@ -115,4 +133,11 @@ export function normalizeDeadlineInput(value) {
     return `${match[1]} ${match[2]}:${match[3]}:00`
   }
   return text
+}
+
+/** 将后端返回的时间转为 datetime-local 可用格式 */
+export function toDatetimeLocalValue(value) {
+  if (value == null || value === '') return ''
+  const text = String(value).trim().replace('T', ' ').slice(0, 16)
+  return text.replace(' ', 'T')
 }

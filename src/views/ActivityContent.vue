@@ -11,8 +11,15 @@ import {
   formatDeadline,
   homeworkStatusLabel,
   isHomeworkOverdue,
+  isBeforeStart,
+  canTakeTest,
+  testStatusLabel,
 } from '@/utils/homeworkDeadline.js';
+import { isImageAttachment, resolveAttachmentUrl } from '@/utils/avatar.js';
 
+const replyImageFile = ref(null);
+const replyImageInputRef = ref(null);
+const replyImagePreview = ref('');
 const route = useRoute();
 const router = useRouter();
 const accountStore = useAccountStore();
@@ -55,9 +62,56 @@ const activityType = computed(() => activity.value?.type || route.query.type || 
 const typeLabel = computed(() => TYPE_LABELS[activityType.value] || '活动');
 const replyActionLabel = computed(() => REPLY_LABELS[activityType.value] || '发表回复');
 const replyPlaceholder = computed(() => REPLY_PLACEHOLDERS[activityType.value] || '写下你的内容…');
-const isTestOverdue = computed(() =>
-    activityType.value === 'test' && activity.value?.deadline && isHomeworkOverdue(activity.value.deadline)
+const isTestType = computed(() => activityType.value === 'test');
+const isTestNotStarted = computed(() =>
+    isTestType.value && activity.value?.start_time && isBeforeStart(activity.value.start_time)
 );
+const isTestOverdue = computed(() =>
+    isTestType.value && activity.value?.deadline && isHomeworkOverdue(activity.value.deadline)
+);
+const isTestActive = computed(() =>
+    isTestType.value && canTakeTest(activity.value?.start_time, activity.value?.deadline)
+);
+const testStatusText = computed(() =>
+    testStatusLabel(activity.value?.start_time, activity.value?.deadline)
+);
+const myTestSubmission = computed(() =>
+    isTestType.value ? replies.value.find(item => item.account === account.value) : null
+);
+const canSubmitTest = computed(() =>
+    isTestActive.value && !myTestSubmission.value
+);
+const canUploadTopicImage = computed(() => activityType.value === 'topic');
+
+function pickReplyImage() {
+  replyImageInputRef.value?.click();
+}
+
+function onReplyImageChange(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    toast.warning('请选择图片文件');
+    return;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    toast.warning('图片不能超过 5MB');
+    return;
+  }
+  replyImageFile.value = file;
+  replyImagePreview.value = URL.createObjectURL(file);
+}
+
+function clearReplyImage() {
+  if (replyImagePreview.value) {
+    URL.revokeObjectURL(replyImagePreview.value);
+  }
+  replyImageFile.value = null;
+  replyImagePreview.value = '';
+  if (replyImageInputRef.value) {
+    replyImageInputRef.value.value = '';
+  }
+}
 
 function loadAccount() {
   request.post('/editor/account', { account: account.value })
@@ -92,29 +146,45 @@ function reloadAll() {
 
 function submitReply() {
   const text = replyText.value.trim();
-  if (!text) {
-    toast.warning('请输入内容');
+  if (!text && !replyImageFile.value) {
+    toast.warning(canUploadTopicImage.value ? '请输入文字或选择图片' : '请输入内容');
     return;
   }
-  if (isTestOverdue.value) {
+  if (isTestType.value) {
+    if (isTestNotStarted.value) {
+      toast.warning('测试尚未开始');
+      return;
+    }
+    if (isTestOverdue.value) {
+      toast.warning('测试已结束，无法提交');
+      return;
+    }
+    if (myTestSubmission.value) {
+      toast.warning('您已提交过该测试');
+      return;
+    }
+  } else if (isTestOverdue.value) {
     toast.warning('测试已截止，无法提交');
     return;
   }
   submitting.value = true;
-  request.post('/editor/addActivityReply', {
-    activity_id: activityId.value,
-    account: account.value,
-    content: text,
-  }).then(ok => {
-    if (ok) {
-      toast.success('发布成功');
-      replyText.value = '';
-      loadReplies();
-      loadActivity();
-    } else {
-      toast.error(activityType.value === 'test' ? '提交失败，可能已截止' : '发布失败');
-    }
-  }).catch(() => toast.error('发布失败'))
+  const formData = new FormData();
+  formData.append('activity_id', String(activityId.value));
+  formData.append('account', account.value);
+  if (text) formData.append('content', text);
+  if (replyImageFile.value) formData.append('file', replyImageFile.value);
+  request.post('/editor/addActivityReply', formData)
+      .then(ok => {
+        if (ok) {
+          toast.success('发布成功');
+          replyText.value = '';
+          clearReplyImage();
+          loadReplies();
+          loadActivity();
+        } else {
+          toast.error(activityType.value === 'test' ? '提交失败，可能不在测试时间或已提交过' : '发布失败');
+        }
+      }).catch(() => toast.error('发布失败'))
       .finally(() => { submitting.value = false; });
 }
 
@@ -161,7 +231,18 @@ reloadAll();
           <span>{{ formatDateTime(activity.create_time) }}</span>
           <span v-if="activity.reply_count != null">{{ activity.reply_count }} 条互动</span>
         </div>
-        <div v-if="activity.deadline" class="activity-deadline">
+        <div v-if="isTestType && activity.start_time && activity.deadline" class="activity-deadline test-window">
+          测试时间：{{ formatDeadline(activity.start_time) }} 至 {{ formatDeadline(activity.deadline) }}
+          <span
+              class="test-status-badge"
+              :class="{
+                pending: isTestNotStarted,
+                active: isTestActive,
+                ended: isTestOverdue,
+              }"
+          >{{ testStatusText }}</span>
+        </div>
+        <div v-else-if="activity.deadline" class="activity-deadline">
           截止时间：{{ formatDeadline(activity.deadline) }}
           <span :class="{ overdue: isTestOverdue }">{{ homeworkStatusLabel(activity.deadline) }}</span>
         </div>
@@ -171,13 +252,19 @@ reloadAll();
 
       <a
           v-if="activity.attachment_url"
-          :href="activity.attachment_url"
+          :href="resolveAttachmentUrl(activity.attachment_url)"
           target="_blank"
           rel="noopener"
           class="attachment-link"
       >
         📎 {{ activity.attachment_name || '查看资料' }}
       </a>
+      <div
+          v-if="activity.attachment_url && isImageAttachment(activity.attachment_url, activity.attachment_name)"
+          class="material-image-preview"
+      >
+        <img :src="resolveAttachmentUrl(activity.attachment_url)" :alt="activity.attachment_name || '资料图片'">
+      </div>
     </div>
 
     <div class="discussion-panel">
@@ -202,25 +289,61 @@ reloadAll();
             <span class="reply-name">{{ item.creator_name || item.account }}</span>
             <span class="reply-time">{{ formatDateTime(item.create_time) }}</span>
           </div>
-          <div class="reply-content">{{ item.content }}</div>
+          <div v-if="item.content" class="reply-content">{{ item.content }}</div>
+          <div v-if="item.attachment_url && isImageAttachment(item.attachment_url, item.attachment_name)" class="reply-image-wrap">
+            <a :href="resolveAttachmentUrl(item.attachment_url)" target="_blank" rel="noopener">
+              <img :src="resolveAttachmentUrl(item.attachment_url)" :alt="item.attachment_name || '图片'" class="reply-image">
+            </a>
+          </div>
+          <a
+              v-else-if="item.attachment_url"
+              :href="resolveAttachmentUrl(item.attachment_url)"
+              target="_blank"
+              rel="noopener"
+              class="reply-attachment-link"
+          >
+            📎 {{ item.attachment_name || '查看附件' }}
+          </a>
         </div>
       </div>
     </div>
 
-    <div class="reply-composer">
+    <div v-if="myTestSubmission" class="my-test-submission">
+      <div class="panel-title">我的提交</div>
+      <div class="reply-content">{{ myTestSubmission.content || '（未填写文字答案）' }}</div>
+      <div class="reply-time">{{ formatDateTime(myTestSubmission.create_time) }}</div>
+    </div>
+
+    <div v-if="canSubmitTest || (!isTestType && !isTestOverdue)" class="reply-composer">
       <div class="composer-title">{{ replyActionLabel }}</div>
-      <p v-if="isTestOverdue" class="composer-tip overdue-tip">测试已截止，无法继续提交</p>
+      <p v-if="isTestNotStarted" class="composer-tip">测试尚未开始，请在开始时间后参与</p>
+      <p v-else-if="isTestOverdue" class="composer-tip overdue-tip">测试已结束，无法继续提交</p>
       <textarea
           v-model="replyText"
-          class="reply-input"
-          :placeholder="replyPlaceholder"
-          :disabled="isTestOverdue"
+          class="reply-input field-control field-textarea field-textarea-md"
+          :placeholder="canUploadTopicImage ? '参与话题讨论，可配图…' : replyPlaceholder"
+          :disabled="isTestType ? !canSubmitTest : isTestOverdue"
       ></textarea>
+      <div v-if="canUploadTopicImage && !isTestOverdue && (!isTestType || canSubmitTest)" class="reply-image-upload">
+        <input
+            ref="replyImageInputRef"
+            type="file"
+            class="hidden-file"
+            accept="image/jpeg,image/png,image/gif,image/webp"
+            @change="onReplyImageChange"
+        >
+        <button type="button" class="btn-image-pick" @click="pickReplyImage">添加图片</button>
+        <span class="image-tip">支持 JPG/PNG/GIF/WebP，最大 5MB</span>
+      </div>
+      <div v-if="replyImagePreview" class="reply-image-preview">
+        <img :src="replyImagePreview" alt="预览">
+        <button type="button" class="preview-remove" @click="clearReplyImage">移除图片</button>
+      </div>
       <div class="composer-actions">
         <button
             type="button"
             class="btn-submit"
-            :disabled="submitting || isTestOverdue"
+            :disabled="submitting || (isTestType ? !canSubmitTest : isTestOverdue)"
             @click="submitReply"
         >
           {{ submitting ? '提交中…' : replyActionLabel }}
@@ -302,6 +425,44 @@ reloadAll();
   font-weight: 600;
 }
 
+.test-window {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.test-status-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.test-status-badge.pending {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.test-status-badge.active {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.test-status-badge.ended {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.my-test-submission {
+  background: #fff;
+  border: 1px solid #e8ecf1;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
 .activity-body {
   margin-top: 16px;
   line-height: 1.75;
@@ -315,6 +476,18 @@ reloadAll();
   color: #4285f4;
   text-decoration: none;
   font-weight: 500;
+}
+
+.material-image-preview {
+  margin-top: 12px;
+}
+
+.material-image-preview img {
+  max-width: min(100%, 480px);
+  max-height: 320px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  object-fit: contain;
 }
 
 .discussion-panel {
@@ -381,6 +554,82 @@ reloadAll();
   white-space: pre-wrap;
 }
 
+.reply-image-wrap {
+  margin-top: 8px;
+}
+
+.reply-image {
+  max-width: min(100%, 320px);
+  max-height: 240px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  object-fit: cover;
+  cursor: zoom-in;
+}
+
+.reply-attachment-link {
+  display: inline-block;
+  margin-top: 8px;
+  color: #4285f4;
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.reply-image-upload {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.hidden-file {
+  display: none;
+}
+
+.btn-image-pick {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #475569;
+  font-size: 14px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.btn-image-pick:hover {
+  border-color: #4285f4;
+  color: #4285f4;
+}
+
+.image-tip {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.reply-image-preview {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.reply-image-preview img {
+  width: 120px;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+}
+
+.preview-remove {
+  border: none;
+  background: none;
+  color: #ef4444;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 .reply-composer {
   background: #fff;
   border: 1px solid #e8ecf1;
@@ -402,29 +651,6 @@ reloadAll();
 
 .overdue-tip {
   color: #ef4444;
-}
-
-.reply-input {
-  width: 100%;
-  min-height: 120px;
-  padding: 12px 14px;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  font-size: 15px;
-  line-height: 1.6;
-  resize: vertical;
-  box-sizing: border-box;
-}
-
-.reply-input:focus {
-  outline: none;
-  border-color: #4285f4;
-  box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.12);
-}
-
-.reply-input:disabled {
-  background: #f8fafc;
-  color: #94a3b8;
 }
 
 .composer-actions {

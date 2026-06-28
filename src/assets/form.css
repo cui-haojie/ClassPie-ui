@@ -1,0 +1,185 @@
+/* 全局表单控件 — 统一输入框、文本域、下拉框样式 */
+
+.form-field {
+  display: block;
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+  letter-spacing: 0.01em;
+}
+
+.field-label em {
+  color: #ef4444;
+  font-style: normal;
+  margin-left: 2px;
+}
+
+/* 文本框 / 下拉 / 日期 */
+.field-control,
+.input,
+.inline-input,
+.reply-input,
+.short-input,
+.homework_submission,
+.grade-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #0f172a;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  min-height: 42px;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.field-control::placeholder,
+.input::placeholder,
+.inline-input::placeholder,
+.reply-input::placeholder,
+.short-input::placeholder {
+  color: #94a3b8;
+}
+
+.field-control:hover:not(:disabled):not(:focus),
+.input:hover:not(:disabled):not(:focus),
+.inline-input:hover:not(:disabled):not(:focus),
+.reply-input:hover:not(:disabled):not(:focus),
+.short-input:hover:not(:disabled):not(:focus) {
+  border-color: #cbd5e1;
+  background: #fff;
+}
+
+.field-control:focus,
+.input:focus,
+.inline-input:focus,
+.reply-input:focus,
+.short-input:focus,
+.homework_submission:focus,
+.grade-input:focus {
+  outline: none;
+  border-color: #488af8;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(72, 138, 248, 0.14);
+}
+
+.field-control:disabled,
+.reply-input:disabled,
+.short-input:disabled {
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+
+/* 多行文本 */
+.field-textarea,
+.field-control.field-textarea,
+.reply-input,
+.short-input,
+.homework_submission,
+.schedule-textarea,
+.schedule-input {
+  height: auto;
+  min-height: 100px;
+  padding: 12px 14px;
+  line-height: 1.65;
+  resize: vertical;
+}
+
+.field-textarea-sm { min-height: 72px; }
+.field-textarea-md { min-height: 96px; }
+.field-textarea-lg { min-height: 140px; }
+
+.homework-detail {
+  min-height: 140px;
+}
+
+/* 下拉框 */
+.field-select,
+select.field-control,
+.inline-select {
+  appearance: none;
+  cursor: pointer;
+  padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-color: #f8fafc;
+}
+
+.field-select:focus,
+select.field-control:focus {
+  background-color: #fff;
+}
+
+/* 数字输入 */
+input[type="number"].field-control,
+.grade-input {
+  max-width: 140px;
+}
+
+/* 日期时间 */
+input[type="datetime-local"].field-control,
+input[type="date"].field-control {
+  color: #334155;
+}
+
+input[type="datetime-local"].field-control::-webkit-calendar-picker-indicator,
+input[type="date"].field-control::-webkit-calendar-picker-indicator {
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+/* 校验失败 */
+.input-invalid,
+.field-control.input-invalid,
+.inline-input.input-invalid {
+  border-color: #f87171;
+  background: #fef2f2;
+}
+
+.input-invalid:focus,
+.field-control.input-invalid:focus,
+.inline-input.input-invalid:focus {
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+}
+
+/* 表单布局 */
+.homework-form,
+.edit-form,
+.wizard-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.form-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 520px) {
+  .form-row-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 文件选择 */
+.file-control {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.hidden-file-input {
+  display: none;
+}

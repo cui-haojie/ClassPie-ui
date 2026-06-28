@@ -5,7 +5,7 @@ import {useCourseUiStore} from "@/stores/courseUi.js";
 import {storeToRefs} from "pinia";
 import request from "@/utils/request.js";
 import {toast} from '@/utils/toast.js';
-import {ref, onMounted, reactive, watch} from "vue";
+import {ref, reactive, watch} from "vue";
 import {computed} from "vue";
 import {INSTITUTION_OPTIONS, resolveMechanism} from '@/constants/institutions.js';
 import {SEMESTER_OPTIONS, formatSemester, getDefaultSemester} from '@/constants/semesters.js';
@@ -120,18 +120,21 @@ function isTeachingCourse(course) {
 
 const filteredCourses = computed(() => {
   let list = semesterScopedCourses.value
-  if (activeTab.value === 'learn') {
-    list = list.filter(course => !isTeachingCourse(course))
-  } else if (activeTab.value === 'teach') {
-    list = list.filter(course => isTeachingCourse(course))
+  if (status.value) {
+    if (activeTab.value === 'learn') {
+      list = list.filter(course => !isTeachingCourse(course))
+    } else if (activeTab.value === 'teach') {
+      list = list.filter(course => isTeachingCourse(course))
+    }
   }
   if (!searchKeyword.value) return list;
   return list.filter(course => {
+    const teacherName = course.teacherName || '';
     return (
         course.class_name.includes(searchKeyword.value) ||
-        course.selected_classes.includes(searchKeyword.value) ||
-        course.teacherName.includes(searchKeyword.value) ||
-        course.code.includes(searchKeyword.value)
+        (course.selected_classes || '').includes(searchKeyword.value) ||
+        teacherName.includes(searchKeyword.value) ||
+        (course.code || '').includes(searchKeyword.value)
     );
   });
 });
@@ -149,10 +152,10 @@ watch(() => status.value, (val) => {
 });
 
 function update() {
-  request.post("/editor/account", {account: account.value})
+  if (!account.value) return Promise.resolve();
+  return request.post("/editor/account", {account: account.value})
       .then((res) => {
         const data = res;
-        console.log(res)
         const {
           account: resAccount,
           name: resName,
@@ -171,33 +174,30 @@ function update() {
         email_or_phone.value = resEmailOrPhone;
         status_number.value = resStatusNumber;
         if (status.value === '学生') {
-          join_Class.value.style.display = 'block';
-          joinOrCreate.value.style.display = 'none';
-        } else {
-          join_Class.value.style.display = 'none';
-          joinOrCreate.value.style.display = 'block';
-          request.post("/editor/addTeacherCourse", {account: account.value})
-              .then((res) => {
-                if (res) {
-                  toast.success("老师课程已同步")
-                  loadCourse();
-                }
-              }).catch((err) => {
-            toast.error("创建失败：" + err.message);
-            console.log(err);
-          })
+          if (join_Class.value) join_Class.value.style.display = 'block';
+          if (joinOrCreate.value) joinOrCreate.value.style.display = 'none';
+          return Promise.resolve();
         }
+        if (join_Class.value) join_Class.value.style.display = 'none';
+        if (joinOrCreate.value) joinOrCreate.value.style.display = 'block';
+        return request.post("/editor/addTeacherCourse", {account: account.value})
+            .then((synced) => {
+              if (synced) toast.success("老师课程已同步");
+            })
+            .catch((err) => {
+              console.error(err);
+            });
       })
+      .then(() => loadCourse())
       .catch(error => {
         console.error(error);
         toast.error(error.message || "请求失败");
       });
 }
 
-onMounted(() => {
-  update()
-  loadCourse()
-});
+watch(account, (val) => {
+  if (val) update();
+}, { immediate: true });
 
 function loadCourse() {
   request.post("/editor/courses", {account: account.value})
@@ -1161,35 +1161,11 @@ function restoreCourse(courseId) {
   font-style: normal;
 }
 
-.field-control {
-  height: 42px;
-  width: 100%;
-  padding: 0 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  font-size: 14px;
-  color: #111827;
-  background: #fff;
-  box-sizing: border-box;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-
-.field-control:focus {
-  outline: none;
-  border-color: rgb(72, 138, 248);
-  box-shadow: 0 0 0 3px rgba(72, 138, 248, 0.12);
-}
-
 .schedule-textarea {
-  height: auto;
   min-height: 72px;
-  padding: 10px 12px;
-  line-height: 1.5;
-  resize: vertical;
 }
 
 .field-select {
-  appearance: auto;
   cursor: pointer;
 }
 

@@ -7,8 +7,9 @@ import request from "@/utils/request.js";
 import {toast} from '@/utils/toast.js';
 import {SEMESTER_OPTIONS, formatSemester} from '@/constants/semesters.js';
 import AppModal from '@/components/AppModal.vue';
+import TestPublishModal from '@/components/TestPublishModal.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
-import {formatDateTime, formatDeadline, homeworkStatusLabel, isHomeworkOverdue, normalizeDeadlineInput} from '@/utils/homeworkDeadline.js';
+import {formatDateTime, formatDeadline, homeworkStatusLabel, isHomeworkOverdue, normalizeDeadlineInput, testStatusLabel} from '@/utils/homeworkDeadline.js';
 import { parseClassTimeSlots } from '@/utils/courseSchedule.js';
 
 /**
@@ -52,7 +53,9 @@ const activeSection = ref('interaction')
 const showEditCourse = ref(false)
 const showHomeworkModal = ref(false)
 const showActivityModal = ref(false)
-const activityForm = ref({ title: '', content: '', deadline: '', attachment_url: '', attachment_name: '' })
+const showTestPublishModal = ref(false)
+const editingDraftId = ref(null)
+const activityForm = ref({ title: '', content: '', start_time: '', deadline: '', attachment_url: '', attachment_name: '' })
 const currentActivityType = ref('interaction')
 const activities = ref({
   interaction: [],
@@ -199,6 +202,26 @@ function cancel() {
   deadline.value = '';
   checkedOptions.value = { personal: false, team: false };
   lastSelected.value = null;
+  clearHomeworkAttachment();
+}
+
+const homeworkAttachmentFile = ref(null);
+const homeworkAttachmentInputRef = ref(null);
+
+function pickHomeworkAttachment() {
+  homeworkAttachmentInputRef.value?.click();
+}
+
+function onHomeworkAttachmentChange(event) {
+  const file = event.target.files?.[0];
+  homeworkAttachmentFile.value = file || null;
+}
+
+function clearHomeworkAttachment() {
+  homeworkAttachmentFile.value = null;
+  if (homeworkAttachmentInputRef.value) {
+    homeworkAttachmentInputRef.value.value = '';
+  }
 }
 
 const checkedOptions = ref({
@@ -257,11 +280,18 @@ const homework = computed(() => ({
 
 function confirmHomework() {
   if (checkType()) {
-    const payload = {
-      ...homework.value,
-      deadline: normalizeDeadlineInput(deadline.value),
+    const formData = new FormData();
+    formData.append('class_id', String(Number(course_id.value)));
+    formData.append('name', title_2.value.trim());
+    formData.append('type', type.value);
+    formData.append('deadline', normalizeDeadlineInput(deadline.value));
+    if (bigInput.value.trim()) {
+      formData.append('details', bigInput.value.trim());
     }
-    request.post("/editor/addHomework", {homework: payload, class_id:Number(course_id.value)})
+    if (homeworkAttachmentFile.value) {
+      formData.append('file', homeworkAttachmentFile.value);
+    }
+    request.post("/editor/addHomework", formData)
         .then((res) => {
           if (res) {
             toast.success("作业添加成功！");
@@ -311,7 +341,7 @@ function handleHomework(homeworkId) {
 
 function loadActivities(type) {
   if (!type) return
-  request.post('/editor/getCourseActivities', { class_id: class_id, type })
+  request.post('/editor/getCourseActivities', { class_id: class_id, type, account: account.value })
       .then(res => { activities.value[type] = Array.isArray(res) ? res : [] })
       .catch(() => toast.error('加载失败'))
   request.post('/editor/getCourseActivityCount', { class_id: class_id, type })
@@ -328,6 +358,30 @@ function switchSection(key) {
   if (tab?.type) loadActivities(tab.type)
 }
 
+const activityAttachmentFile = ref(null);
+const activityAttachmentInputRef = ref(null);
+
+function pickActivityAttachment() {
+  activityAttachmentInputRef.value?.click();
+}
+
+function onActivityAttachmentChange(event) {
+  const file = event.target.files?.[0];
+  activityAttachmentFile.value = file || null;
+  if (file) {
+    activityForm.value.attachment_name = file.name;
+  }
+}
+
+function clearActivityAttachment() {
+  activityAttachmentFile.value = null;
+  if (activityAttachmentInputRef.value) {
+    activityAttachmentInputRef.value.value = '';
+  }
+  activityForm.value.attachment_url = '';
+  activityForm.value.attachment_name = '';
+}
+
 function openAddActivity() {
   if (status.value !== '老师') {
     toast.warning('仅教师可发布')
@@ -335,8 +389,14 @@ function openAddActivity() {
   }
   const tab = activeTabMeta.value
   if (!tab.type) return
+  if (tab.type === 'test') {
+    editingDraftId.value = null
+    showTestPublishModal.value = true
+    return
+  }
   currentActivityType.value = tab.type
-  activityForm.value = { title: '', content: '', deadline: '', attachment_url: '', attachment_name: '' }
+  activityForm.value = { title: '', content: '', start_time: '', deadline: '', attachment_url: '', attachment_name: '' }
+  clearActivityAttachment()
   showActivityModal.value = true
 }
 
@@ -345,32 +405,57 @@ function confirmActivity() {
     toast.warning('请填写标题')
     return
   }
-  request.post('/editor/addCourseActivity', {
-    class_id,
-    activity: {
-      type: currentActivityType.value,
-      title: activityForm.value.title.trim(),
-      content: activityForm.value.content.trim(),
-      deadline: currentActivityType.value === 'test' ? normalizeDeadlineInput(activityForm.value.deadline) : null,
-      attachment_url: activityForm.value.attachment_url.trim() || null,
-      attachment_name: activityForm.value.attachment_name.trim() || null,
-      creator_account: account.value,
-    },
-  }).then(ok => {
-    if (ok) {
-      toast.success('发布成功')
-      showActivityModal.value = false
-      loadActivities(currentActivityType.value)
-    } else {
-      toast.error('发布失败')
-    }
-  }).catch(() => toast.error('发布失败'))
+  if (currentActivityType.value === 'material' && !activityAttachmentFile.value && !activityForm.value.attachment_url.trim()) {
+    toast.warning('请上传资料文件或填写资料链接')
+    return
+  }
+  const formData = new FormData();
+  formData.append('class_id', String(class_id));
+  formData.append('type', currentActivityType.value);
+  formData.append('title', activityForm.value.title.trim());
+  formData.append('creator_account', account.value);
+  if (activityForm.value.content.trim()) {
+    formData.append('content', activityForm.value.content.trim());
+  }
+  if (activityAttachmentFile.value) {
+    formData.append('file', activityAttachmentFile.value);
+  } else if (activityForm.value.attachment_url.trim()) {
+    formData.append('attachment_url', activityForm.value.attachment_url.trim());
+    formData.append('attachment_name', activityForm.value.attachment_name.trim() || '资料附件');
+  }
+  request.post('/editor/addCourseActivity', formData)
+      .then(ok => {
+        if (ok) {
+          toast.success('发布成功')
+          showActivityModal.value = false
+          clearActivityAttachment()
+          loadActivities(currentActivityType.value)
+        } else {
+          toast.error('发布失败，请检查测试时间或是否已提交')
+        }
+      }).catch(() => toast.error('发布失败'))
 }
 
 function openActivityDetail(item) {
   const activityId = item?.id ?? item?.activity_id;
   if (!activityId) {
     toast.error('活动数据异常，无法打开');
+    return;
+  }
+  if (item.type === 'test') {
+    if (item.publish_status === 'draft' && status.value === '老师') {
+      router.push({
+        name: 'testEditor',
+        params: { id: String(activityId) },
+        query: { classId: course_id.value },
+      }).catch(() => {});
+      return;
+    }
+    router.push({
+      name: 'testContent',
+      params: { id: String(activityId) },
+      query: { classId: course_id.value },
+    }).catch(() => {});
     return;
   }
   router.push({
@@ -384,7 +469,10 @@ function openActivityDetail(item) {
 function replyCountLabel(item) {
   const count = item.reply_count ?? 0;
   const type = item.type || activeTabMeta.value.type;
-  if (type === 'test') return `${count} 人已提交`;
+  if (type === 'test') {
+    if (item.publish_status === 'draft') return '草稿 · 继续编辑';
+    return `${count} 人已交卷`;
+  }
   return `${count} 条讨论`;
 }
 
@@ -398,6 +486,15 @@ loadAllActivities()
 </script>
 
 <template>
+  <TestPublishModal
+      v-model="showTestPublishModal"
+      :class-id="class_id"
+      :creator-account="account"
+      :draft-id="editingDraftId"
+      @published="loadActivities('test')"
+      @saved="loadActivities('test')"
+  />
+
   <AppModal
       v-model="showActivityModal"
       :title="activeTabMeta.addLabel"
@@ -411,19 +508,33 @@ loadAllActivities()
       </label>
       <label class="form-field">
         <span class="field-label">内容</span>
-        <textarea v-model="activityForm.content" class="field-control field-textarea homework-detail" placeholder="详细说明、讨论内容或公告正文"></textarea>
-      </label>
-      <label v-if="currentActivityType === 'test'" class="form-field">
-        <span class="field-label">截止时间</span>
-        <input v-model="activityForm.deadline" type="datetime-local" step="60" class="field-control">
+        <textarea v-model="activityForm.content" class="field-control field-textarea field-textarea-md" placeholder="详细说明、讨论内容或公告正文"></textarea>
       </label>
       <template v-if="currentActivityType === 'material'">
         <label class="form-field">
-          <span class="field-label">资料链接（选填）</span>
-          <input v-model="activityForm.attachment_url" type="text" placeholder="https://..." class="field-control">
+          <span class="field-label">上传资料文件</span>
+          <div class="homework-attachment-upload">
+            <input
+                ref="activityAttachmentInputRef"
+                type="file"
+                class="hidden-file-input"
+                accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z,.txt"
+                @change="onActivityAttachmentChange"
+            >
+            <button type="button" class="btn-attachment-pick" @click="pickActivityAttachment">选择文件</button>
+            <span v-if="activityAttachmentFile" class="attachment-selected">
+              {{ activityAttachmentFile.name }}
+              <button type="button" class="attachment-remove" @click="clearActivityAttachment">移除</button>
+            </span>
+            <span v-else class="attachment-hint">支持 PDF、Office、图片、压缩包等，最大 10MB</span>
+          </div>
         </label>
         <label class="form-field">
-          <span class="field-label">资料名称（选填）</span>
+          <span class="field-label">或填写外链（选填）</span>
+          <input v-model="activityForm.attachment_url" type="text" placeholder="https://..." class="field-control">
+        </label>
+        <label v-if="activityForm.attachment_url && !activityAttachmentFile" class="form-field">
+          <span class="field-label">外链名称（选填）</span>
           <input v-model="activityForm.attachment_name" type="text" placeholder="如：第一章课件.pdf" class="field-control">
         </label>
       </template>
@@ -458,11 +569,29 @@ loadAllActivities()
       </label>
       <label class="form-field">
         <span class="field-label">作业详情</span>
-        <textarea v-model="bigInput" class="field-control field-textarea homework-detail" placeholder="作业要求、说明等"></textarea>
+        <textarea v-model="bigInput" class="field-control field-textarea field-textarea-lg" placeholder="作业要求、说明等"></textarea>
       </label>
       <label class="form-field">
         <span class="field-label">截止时间</span>
         <input v-model="deadline" type="datetime-local" step="60" class="field-control">
+      </label>
+      <label class="form-field">
+        <span class="field-label">作业附件</span>
+        <div class="homework-attachment-upload">
+          <input
+              ref="homeworkAttachmentInputRef"
+              type="file"
+              class="hidden-file-input"
+              accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar,.7z,.txt"
+              @change="onHomeworkAttachmentChange"
+          >
+          <button type="button" class="btn-attachment-pick" @click="pickHomeworkAttachment">选择附件</button>
+          <span v-if="homeworkAttachmentFile" class="attachment-selected">
+            {{ homeworkAttachmentFile.name }}
+            <button type="button" class="attachment-remove" @click="clearHomeworkAttachment">移除</button>
+          </span>
+          <span v-else class="attachment-hint">支持 PDF、Office、图片、压缩包等，最大 10MB</span>
+        </div>
       </label>
     </div>
     <template #footer>
@@ -479,7 +608,7 @@ loadAllActivities()
       </label>
       <label class="form-field">
         <span class="field-label">学年学期</span>
-        <select v-model="editForm.semester" class="field-control">
+        <select v-model="editForm.semester" class="field-control field-select">
           <option v-for="item in semesterOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
         </select>
       </label>
@@ -487,7 +616,7 @@ loadAllActivities()
         <span class="field-label">上课时间</span>
         <textarea
             v-model="editForm.class_time"
-            class="field-control field-textarea schedule-input"
+            class="field-control field-textarea field-textarea-sm schedule-input"
             placeholder="可填多个时段，用顿号或换行分隔&#10;例如：周一 1-2 节、周三 3-4 节、周五 5-6 节"
         ></textarea>
       </label>
@@ -615,11 +744,27 @@ loadAllActivities()
                 {{ activeTabMeta.icon }}
               </div>
               <div class="homeworkContent">
-                <div class="homeworkTitle">{{ item.title }}</div>
+                <div class="homeworkTitle">
+                  {{ item.title }}
+                  <span v-if="item.type === 'test' && item.publish_status === 'draft'" class="draft-tag">草稿</span>
+                </div>
                 <div class="homeworkType">
                   {{ item.creator_name || item.creator_account }}
                   · {{ formatDateTime(item.create_time) }}
-                  <template v-if="item.deadline">
+                  <template v-if="item.type === 'test' && item.publish_status === 'draft'">
+                    · 未发布
+                    <template v-if="item.choice_count || item.short_count">
+                      · 选择题 {{ item.choice_count ?? 0 }} · 简答题 {{ item.short_count ?? 0 }}
+                    </template>
+                  </template>
+                  <template v-else-if="item.type === 'test' && item.start_time && item.deadline">
+                    · {{ formatDeadline(item.start_time) }} 至 {{ formatDeadline(item.deadline) }}
+                    · {{ testStatusLabel(item.start_time, item.deadline) }}
+                  </template>
+                  <template v-if="item.type === 'test' && (item.choice_count || item.short_count)">
+                    · 选择题 {{ item.choice_count ?? 0 }} · 简答题 {{ item.short_count ?? 0 }}
+                  </template>
+                  <template v-else-if="item.deadline">
                     · 截止 {{ formatDeadline(item.deadline) }}
                   </template>
                 </div>
@@ -977,7 +1122,7 @@ loadAllActivities()
 }
 
 .homework-detail {
-  min-height: 180px;
+  min-height: 140px;
 }
 
 .member-header {
@@ -992,6 +1137,22 @@ loadAllActivities()
 
 .activity-box {
   cursor: pointer;
+}
+
+.draft-tag {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #b45309;
+  vertical-align: middle;
+}
+
+.activity-box:has(.draft-tag) {
+  border-left: 3px solid #f59e0b;
 }
 
 .activity-icon {
@@ -1084,5 +1245,50 @@ loadAllActivities()
 
 .detail-link:hover {
   text-decoration: underline;
+}
+
+.homework-attachment-upload {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.hidden-file-input {
+  display: none;
+}
+
+.btn-attachment-pick {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #475569;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.btn-attachment-pick:hover {
+  border-color: #4285f4;
+  color: #4285f4;
+}
+
+.attachment-selected {
+  font-size: 14px;
+  color: #334155;
+}
+
+.attachment-remove {
+  border: none;
+  background: none;
+  color: #ef4444;
+  cursor: pointer;
+  margin-left: 8px;
+  font-size: 13px;
+}
+
+.attachment-hint {
+  font-size: 13px;
+  color: #94a3b8;
 }
 </style>
