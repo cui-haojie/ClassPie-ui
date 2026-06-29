@@ -48,11 +48,52 @@ const testQuestions = ref([]);
 
 const editorTitle = computed(() => editingId.value ? '编辑备课内容' : '新建备课内容');
 
+function emptyChoiceQuestion() {
+  return {
+    question_type: 'choice',
+    stem: '',
+    stem_image_url: '',
+    option_a: '',
+    option_b: '',
+    option_c: '',
+    option_d: '',
+    correct_option: 'A',
+    score: 5,
+  };
+}
+
+function emptyShortQuestion() {
+  return {
+    question_type: 'short',
+    stem: '',
+    stem_image_url: '',
+    score: 10,
+  };
+}
+
+function normalizeTestQuestion(q) {
+  return {
+    question_type: q.question_type === 'short' ? 'short' : 'choice',
+    stem: q.stem || '',
+    stem_image_url: q.stem_image_url || '',
+    option_a: q.option_a || '',
+    option_b: q.option_b || '',
+    option_c: q.option_c || '',
+    option_d: q.option_d || '',
+    correct_option: q.correct_option || 'A',
+    score: q.score ?? (q.question_type === 'short' ? 10 : 5),
+  };
+}
+
 function loadItems() {
   request.post('/editor/listPrepItems', {
     teacher_account: account.value,
     kind: activeKind.value || undefined,
-  }).then(res => { items.value = Array.isArray(res) ? res : []; });
+  }).then(res => { items.value = Array.isArray(res) ? res : []; })
+      .catch(err => {
+        console.error(err);
+        toast.error('备课区加载失败，请确认后端已更新并执行 migration_teacher_prep.sql');
+      });
 }
 
 function switchKind(key) {
@@ -72,7 +113,7 @@ function openCreate(kind = 'homework') {
     attachment_url: '',
     attachment_name: '',
   };
-  testQuestions.value = [{ question_type: 'choice', stem: '', option_a: '', option_b: '', option_c: '', option_d: '', correct_option: 'A', score: 5 }];
+  testQuestions.value = [emptyChoiceQuestion()];
   prepFile.value = null;
   showEditor.value = true;
 }
@@ -92,9 +133,9 @@ function openEdit(item) {
           attachment_url: detail.attachment_url || '',
           attachment_name: detail.attachment_name || '',
         };
-        testQuestions.value = (detail.questions || []).map(q => ({ ...q }));
+        testQuestions.value = (detail.questions || []).map(q => normalizeTestQuestion(q));
         if (detail.kind === 'test' && !testQuestions.value.length) {
-          testQuestions.value = [{ question_type: 'choice', stem: '', option_a: '', option_b: '', option_c: '', option_d: '', correct_option: 'A', score: 5 }];
+          testQuestions.value = [emptyChoiceQuestion()];
         }
         prepFile.value = null;
         showEditor.value = true;
@@ -121,8 +162,36 @@ function onPrepFileChange(e) {
   prepFile.value = e.target.files?.[0] || null;
 }
 
-function addTestQuestion() {
-  testQuestions.value.push({ question_type: 'choice', stem: '', option_a: '', option_b: '', option_c: '', option_d: '', correct_option: 'A', score: 5 });
+function addTestQuestion(type = 'choice') {
+  testQuestions.value.push(type === 'short' ? emptyShortQuestion() : emptyChoiceQuestion());
+}
+
+function removeTestQuestion(index) {
+  testQuestions.value.splice(index, 1);
+}
+
+function uploadQuestionImage(q, event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  request.post('/editor/uploadTestQuestionImage', fd).then(res => {
+    if (res?.url) {
+      q.stem_image_url = res.url;
+      toast.success('配图已上传');
+    } else {
+      toast.error('配图上传失败');
+    }
+  }).catch(() => toast.error('配图上传失败'));
+  event.target.value = '';
+}
+
+function removeQuestionImage(q) {
+  q.stem_image_url = '';
+}
+
+function validTestQuestions() {
+  return testQuestions.value.filter(q => q.stem?.trim() || q.stem_image_url);
 }
 
 function savePrep() {
@@ -133,6 +202,22 @@ function savePrep() {
   if (form.value.kind === 'material' && !prepFile.value && !form.value.attachment_url.trim() && !editingId.value) {
     toast.warning('资料需上传文件或填写链接');
     return;
+  }
+  if (form.value.kind === 'test') {
+    const validQs = validTestQuestions();
+    if (!validQs.length) {
+      toast.warning('请至少添加一道题目（填写题干或上传配图）');
+      return;
+    }
+    for (let i = 0; i < validQs.length; i++) {
+      const q = validQs[i];
+      if (q.question_type === 'choice') {
+        if (!q.option_a?.trim() || !q.option_b?.trim() || !q.option_c?.trim() || !q.option_d?.trim()) {
+          toast.warning(`第 ${i + 1} 题选择题选项不完整`);
+          return;
+        }
+      }
+    }
   }
   const fd = new FormData();
   if (editingId.value) fd.append('id', String(editingId.value));
@@ -147,7 +232,17 @@ function savePrep() {
   if (form.value.kind === 'test') {
     if (form.value.start_time) fd.append('start_time', normalizeDeadlineInput(form.value.start_time));
     if (form.value.deadline) fd.append('deadline', normalizeDeadlineInput(form.value.deadline));
-    fd.append('questions_json', JSON.stringify(testQuestions.value.filter(q => q.stem?.trim())));
+    fd.append('questions_json', JSON.stringify(validTestQuestions().map(q => ({
+      question_type: q.question_type,
+      stem: q.stem?.trim() || '',
+      stem_image_url: q.stem_image_url || null,
+      option_a: q.option_a?.trim(),
+      option_b: q.option_b?.trim(),
+      option_c: q.option_c?.trim(),
+      option_d: q.option_d?.trim(),
+      correct_option: q.question_type === 'choice' ? q.correct_option : null,
+      score: Number(q.score) || (q.question_type === 'short' ? 10 : 5),
+    }))));
   }
   if (prepFile.value) {
     fd.append('file', prepFile.value);
@@ -250,26 +345,46 @@ onMounted(loadItems);
           <div class="test-questions">
             <div class="test-questions-head">
               <strong>测试题目</strong>
-              <button type="button" class="btn-ghost" @click="addTestQuestion">+ 添加题目</button>
+              <div class="test-add-btns">
+                <button type="button" class="btn-add-choice" @click="addTestQuestion('choice')">+ 选择题</button>
+                <button type="button" class="btn-add-short" @click="addTestQuestion('short')">+ 简答题</button>
+              </div>
             </div>
-            <div v-for="(q, idx) in testQuestions" :key="idx" class="test-question-block">
-              <label>第 {{ idx + 1 }} 题</label>
-              <select v-model="q.question_type" class="field-control">
-                <option value="choice">选择题</option>
-                <option value="short">简答题</option>
-              </select>
-              <input v-model="q.stem" type="text" class="field-control" placeholder="题干">
+            <div v-for="(q, idx) in testQuestions" :key="idx" class="test-question-block" :class="q.question_type">
+              <div class="test-q-toolbar">
+                <span class="test-q-label">第 {{ idx + 1 }} 题 · {{ q.question_type === 'short' ? '简答题' : '选择题' }}</span>
+                <button type="button" class="btn-remove-q" @click="removeTestQuestion(idx)">删除</button>
+              </div>
+              <label class="form-field">
+                <span>题干</span>
+                <textarea v-model="q.stem" class="field-control field-textarea" placeholder="请输入题目文字（可与配图一起使用）"></textarea>
+              </label>
+              <div class="stem-image-row">
+                <label class="btn-ghost btn-upload">
+                  上传配图
+                  <input type="file" accept="image/*" class="hidden-file-input" @change="uploadQuestionImage(q, $event)">
+                </label>
+                <button v-if="q.stem_image_url" type="button" class="btn-ghost" @click="removeQuestionImage(q)">移除配图</button>
+              </div>
+              <img v-if="q.stem_image_url" :src="q.stem_image_url" class="stem-image-preview" alt="题干配图">
               <template v-if="q.question_type === 'choice'">
                 <input v-model="q.option_a" type="text" class="field-control" placeholder="选项 A">
                 <input v-model="q.option_b" type="text" class="field-control" placeholder="选项 B">
                 <input v-model="q.option_c" type="text" class="field-control" placeholder="选项 C">
                 <input v-model="q.option_d" type="text" class="field-control" placeholder="选项 D">
                 <select v-model="q.correct_option" class="field-control">
-                  <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option>
+                  <option value="A">正确答案 A</option>
+                  <option value="B">正确答案 B</option>
+                  <option value="C">正确答案 C</option>
+                  <option value="D">正确答案 D</option>
                 </select>
               </template>
-              <input v-model.number="q.score" type="number" min="1" class="field-control" placeholder="分值">
+              <label class="form-field field-inline-score">
+                <span>分值</span>
+                <input v-model.number="q.score" type="number" min="1" class="field-control score-input">
+              </label>
             </div>
+            <p v-if="!testQuestions.length" class="test-empty-tip">点击上方按钮添加选择题或简答题</p>
           </div>
         </template>
 
@@ -316,8 +431,21 @@ onMounted(loadItems);
 .field-control { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; }
 .field-textarea { min-height: 80px; resize: vertical; }
 .test-questions { border-top: 1px solid #e2e8f0; padding-top: 12px; }
-.test-questions-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.test-question-block { background: #f8fafc; padding: 10px; border-radius: 8px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px; }
+.test-questions-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px; }
+.test-add-btns { display: flex; gap: 8px; }
+.btn-add-choice { background: #488af8; color: #fff; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+.btn-add-short { background: #22c55e; color: #fff; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+.test-question-block { background: #f8fafc; padding: 12px; border-radius: 8px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px; border: 1px solid #e2e8f0; }
+.test-question-block.short { background: #f0fdf4; border-color: #bbf7d0; }
+.test-q-toolbar { display: flex; justify-content: space-between; align-items: center; }
+.test-q-label { font-size: 13px; font-weight: 600; color: #334155; }
+.btn-remove-q { border: none; background: #fee2e2; color: #b91c1c; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.stem-image-row { display: flex; gap: 8px; align-items: center; }
+.btn-upload { position: relative; overflow: hidden; cursor: pointer; }
+.stem-image-preview { max-width: 100%; max-height: 200px; border-radius: 8px; border: 1px solid #e2e8f0; object-fit: contain; }
+.field-inline-score { max-width: 120px; }
+.score-input { max-width: 100px; }
+.test-empty-tip { color: #94a3b8; font-size: 13px; text-align: center; margin: 8px 0; }
 .btn-primary, .btn-ghost, .btn-danger { padding: 8px 14px; border-radius: 8px; border: none; cursor: pointer; }
 .btn-primary { background: #488af8; color: #fff; }
 .btn-ghost { background: #f1f5f9; color: #334155; }

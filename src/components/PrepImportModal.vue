@@ -64,6 +64,7 @@ watch(() => props.modelValue, (open) => {
       :title="title"
       :subtitle="`选择已准备的${kindLabel}，将填充到发布表单`"
       size="md"
+      elevated
       @update:model-value="emit('update:modelValue', $event)"
   >
     <div v-if="loading" class="prep-import-empty">加载中...</div>

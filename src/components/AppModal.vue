@@ -8,6 +8,8 @@ const props = defineProps({
   subtitle: { type: String, default: '' },
   size: { type: String, default: 'md' },
   closable: { type: Boolean, default: true },
+  /** 叠在其它弹窗之上（如从弹窗内再打开导入） */
+  elevated: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -30,7 +32,12 @@ function close() {
 <template>
   <Teleport to="body">
     <Transition name="modal-fade">
-      <div v-if="modelValue" class="app-modal-overlay" @click.self="close">
+      <div
+          v-if="modelValue"
+          class="app-modal-overlay"
+          :class="{ 'app-modal-overlay-elevated': elevated }"
+          @click.self="close"
+      >
         <div class="app-modal" :class="`app-modal-${size}`" role="dialog" aria-modal="true">
           <div class="app-modal-header">
             <div class="app-modal-heading">

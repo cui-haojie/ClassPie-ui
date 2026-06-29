@@ -45,7 +45,12 @@ request.interceptors.response.use(
                 router.push({ name: 'login' })
             }
         } else if (status === 404) {
-            toast.error('未找到请求接口')
+            const url = error.config?.url || ''
+            if (url.includes('Prep') || url.includes('prep')) {
+                toast.error('备课区接口未加载，请重启 ClassPiServer 后端后再试')
+            } else {
+                toast.error('未找到请求接口')
+            }
         } else if (status === 500) {
             toast.error('系统异常，请检查后端控制台')
         } else if (!error.response) {

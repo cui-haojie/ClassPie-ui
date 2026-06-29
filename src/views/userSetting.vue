@@ -36,6 +36,10 @@ const status = ref('')
 const mechanism = ref('')
 const email_or_phone = ref('')
 const status_number = ref('')
+const department = ref('')
+const major = ref('')
+const grade_level = ref('')
+const enrollment_date = ref('')
 const schoolClassName = ref('')
 const studentClassIds = ref([])
 const schoolClasses = ref([])
@@ -56,6 +60,10 @@ const editDraft = reactive({
   status_number: '',
   mechanism: '',
   customMechanism: '',
+  department: '',
+  major: '',
+  grade_level: '',
+  enrollment_date: '',
   schoolClassIds: [],
 })
 
@@ -68,6 +76,10 @@ const editErrors = reactive({
   status_number: '',
   mechanism: '',
   customMechanism: '',
+  department: '',
+  major: '',
+  grade_level: '',
+  enrollment_date: '',
   schoolClasses: '',
 })
 
@@ -97,6 +109,10 @@ function update() {
         mechanism.value = res.mechanism || ''
         email_or_phone.value = res.email_or_phone || ''
         status_number.value = res.status_number || ''
+        department.value = res.department || ''
+        major.value = res.major || ''
+        grade_level.value = res.grade_level || ''
+        enrollment_date.value = res.enrollment_date || ''
         avatarUrl.value = res.avatar_url || ''
         accountStore.setAvatarUrl(res.avatar_url || null)
         accountStore.setName(res.name || null)
@@ -132,6 +148,25 @@ function clearEditErrors() {
   })
 }
 
+function validateProfileText(value, label, maxLen = 64) {
+  const v = (value || '').trim()
+  if (!v) return `请输入${label}`
+  if (v.length > maxLen) return `${label}不超过 ${maxLen} 字`
+  return ''
+}
+
+function validateStatusNumber(value, role) {
+  const v = (value || '').trim()
+  if (!v) return role === '老师' ? '请输入工号' : '请输入学号'
+  if (role === '学生') return validateStudentId(v)
+  if (v.length > 32) return '工号不超过 32 字'
+  return ''
+}
+
+function statusNumberLabel() {
+  return status.value === '老师' ? '工号' : '学号'
+}
+
 function startEdit(field) {
   if (editingField.value && editingField.value !== field) {
     cancelEdit()
@@ -155,6 +190,18 @@ function startEdit(field) {
       break
     case 'status_number':
       editDraft.status_number = status_number.value
+      break
+    case 'department':
+      editDraft.department = department.value
+      break
+    case 'major':
+      editDraft.major = major.value
+      break
+    case 'grade_level':
+      editDraft.grade_level = grade_level.value
+      break
+    case 'enrollment_date':
+      editDraft.enrollment_date = enrollment_date.value
       break
     case 'mechanism': {
       const form = mechanismToForm(mechanism.value)
@@ -198,7 +245,19 @@ function validateEditField(field) {
       setEditError('passwordConfirm', validatePasswordConfirm(editDraft.password, editDraft.passwordConfirm))
       break
     case 'status_number':
-      setEditError('status_number', validateStudentId(editDraft.status_number))
+      setEditError('status_number', validateStatusNumber(editDraft.status_number, status.value))
+      break
+    case 'department':
+      setEditError('department', validateProfileText(editDraft.department, '院系'))
+      break
+    case 'major':
+      setEditError('major', validateProfileText(editDraft.major, '专业'))
+      break
+    case 'grade_level':
+      setEditError('grade_level', validateProfileText(editDraft.grade_level, '年级', 32))
+      break
+    case 'enrollment_date':
+      setEditError('enrollment_date', editDraft.enrollment_date ? '' : '请选择入学时间')
       break
     case 'mechanism':
       setEditError('mechanism', validateMechanism(editDraft.mechanism, editDraft.customMechanism))
@@ -279,6 +338,18 @@ async function saveEdit(field) {
         break
       case 'status_number':
         payload.status_number = editDraft.status_number.trim()
+        break
+      case 'department':
+        payload.department = editDraft.department.trim()
+        break
+      case 'major':
+        payload.major = editDraft.major.trim()
+        break
+      case 'grade_level':
+        payload.grade_level = editDraft.grade_level.trim()
+        break
+      case 'enrollment_date':
+        payload.enrollment_date = editDraft.enrollment_date
         break
       case 'mechanism':
         payload.mechanism = resolveMechanism(editDraft.mechanism, editDraft.customMechanism)
@@ -542,7 +613,7 @@ update()
           </li>
 
           <li :class="{ 'row-editing': editingField === 'status_number' }">
-            <label>学号</label>
+            <label>{{ statusNumberLabel() }}</label>
             <div class="field-body">
               <template v-if="editingField !== 'status_number'">
                 <span class="content" v-if="status_number">{{ status_number }}</span>
@@ -553,12 +624,12 @@ update()
                   <input
                       v-model="editDraft.status_number"
                       type="text"
-                      inputmode="numeric"
-                      maxlength="20"
+                      :inputmode="status === '学生' ? 'numeric' : 'text'"
+                      maxlength="32"
                       class="inline-input"
                       :class="{ 'input-invalid': editErrors.status_number }"
-                      placeholder="6~20 位数字"
-                      @input="editDraft.status_number = editDraft.status_number.replace(/\D/g, '')"
+                      :placeholder="status === '老师' ? '请输入工号' : '6~20 位数字'"
+                      @input="status === '学生' && (editDraft.status_number = editDraft.status_number.replace(/\D/g, ''))"
                       @blur="validateEditField('status_number')"
                   >
                   <p v-if="editErrors.status_number" class="field-error">{{ editErrors.status_number }}</p>
@@ -623,11 +694,53 @@ update()
             </div>
           </li>
 
-          <li>
-            <label>院系</label><span class="hint">未完善</span>
+          <li :class="{ 'row-editing': editingField === 'department' }">
+            <label>院系</label>
+            <div class="field-body">
+              <template v-if="editingField !== 'department'">
+                <span class="content" v-if="department">{{ department }}</span>
+                <span class="hint" v-else>未完善</span>
+              </template>
+              <template v-else>
+                <div class="inline-edit">
+                  <input v-model="editDraft.department" type="text" maxlength="64" class="inline-input" :class="{ 'input-invalid': editErrors.department }" placeholder="如 计算机学院" @blur="validateEditField('department')">
+                  <p v-if="editErrors.department" class="field-error">{{ editErrors.department }}</p>
+                </div>
+              </template>
+            </div>
+            <div class="right">
+              <template v-if="editingField !== 'department'">
+                <span class="action-link" @click="startEdit('department')">编辑</span>
+              </template>
+              <template v-else>
+                <span class="action-link muted" @click="cancelEdit">取消</span>
+                <span class="action-link" :class="{ disabled: saving }" @click="saveEdit('department')">保存</span>
+              </template>
+            </div>
           </li>
-          <li>
-            <label>专业</label><span class="hint">未完善</span>
+          <li :class="{ 'row-editing': editingField === 'major' }">
+            <label>专业</label>
+            <div class="field-body">
+              <template v-if="editingField !== 'major'">
+                <span class="content" v-if="major">{{ major }}</span>
+                <span class="hint" v-else>未完善</span>
+              </template>
+              <template v-else>
+                <div class="inline-edit">
+                  <input v-model="editDraft.major" type="text" maxlength="64" class="inline-input" :class="{ 'input-invalid': editErrors.major }" placeholder="如 软件工程" @blur="validateEditField('major')">
+                  <p v-if="editErrors.major" class="field-error">{{ editErrors.major }}</p>
+                </div>
+              </template>
+            </div>
+            <div class="right">
+              <template v-if="editingField !== 'major'">
+                <span class="action-link" @click="startEdit('major')">编辑</span>
+              </template>
+              <template v-else>
+                <span class="action-link muted" @click="cancelEdit">取消</span>
+                <span class="action-link" :class="{ disabled: saving }" @click="saveEdit('major')">保存</span>
+              </template>
+            </div>
           </li>
           <li :class="{ 'row-editing': editingField === 'schoolClasses' }">
             <label>班级</label>
@@ -672,11 +785,53 @@ update()
               </template>
             </div>
           </li>
-          <li>
-            <label>年级</label><span class="hint">未完善</span>
+          <li :class="{ 'row-editing': editingField === 'grade_level' }">
+            <label>年级</label>
+            <div class="field-body">
+              <template v-if="editingField !== 'grade_level'">
+                <span class="content" v-if="grade_level">{{ grade_level }}</span>
+                <span class="hint" v-else>未完善</span>
+              </template>
+              <template v-else>
+                <div class="inline-edit">
+                  <input v-model="editDraft.grade_level" type="text" maxlength="32" class="inline-input" :class="{ 'input-invalid': editErrors.grade_level }" placeholder="如 2022级" @blur="validateEditField('grade_level')">
+                  <p v-if="editErrors.grade_level" class="field-error">{{ editErrors.grade_level }}</p>
+                </div>
+              </template>
+            </div>
+            <div class="right">
+              <template v-if="editingField !== 'grade_level'">
+                <span class="action-link" @click="startEdit('grade_level')">编辑</span>
+              </template>
+              <template v-else>
+                <span class="action-link muted" @click="cancelEdit">取消</span>
+                <span class="action-link" :class="{ disabled: saving }" @click="saveEdit('grade_level')">保存</span>
+              </template>
+            </div>
           </li>
-          <li class="row-last">
-            <label>入学时间</label><span class="hint">未完善</span>
+          <li class="row-last" :class="{ 'row-editing': editingField === 'enrollment_date' }">
+            <label>入学时间</label>
+            <div class="field-body">
+              <template v-if="editingField !== 'enrollment_date'">
+                <span class="content" v-if="enrollment_date">{{ enrollment_date }}</span>
+                <span class="hint" v-else>未完善</span>
+              </template>
+              <template v-else>
+                <div class="inline-edit">
+                  <input v-model="editDraft.enrollment_date" type="month" class="inline-input" :class="{ 'input-invalid': editErrors.enrollment_date }" @blur="validateEditField('enrollment_date')">
+                  <p v-if="editErrors.enrollment_date" class="field-error">{{ editErrors.enrollment_date }}</p>
+                </div>
+              </template>
+            </div>
+            <div class="right">
+              <template v-if="editingField !== 'enrollment_date'">
+                <span class="action-link" @click="startEdit('enrollment_date')">编辑</span>
+              </template>
+              <template v-else>
+                <span class="action-link muted" @click="cancelEdit">取消</span>
+                <span class="action-link" :class="{ disabled: saving }" @click="saveEdit('enrollment_date')">保存</span>
+              </template>
+            </div>
           </li>
         </ul>
 

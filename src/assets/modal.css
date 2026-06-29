@@ -10,6 +10,10 @@
   padding: 24px;
 }
 
+.app-modal-overlay-elevated {
+  z-index: 10100;
+}
+
 .app-modal {
   background: #fff;
   border-radius: 16px;

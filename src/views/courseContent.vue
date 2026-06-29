@@ -673,8 +673,19 @@ function replyCountLabel(item) {
 }
 
 function interactionKindLabel(item) {
+  if (item.interaction_kind === 'vote') return '投票';
+  if (item.interaction_kind === 'race') return '抢答';
   if (item.interaction_kind === 'qa') return '课堂问答';
   return '课堂互动';
+}
+
+function interactionStatusLabel(item) {
+  try {
+    const opts = JSON.parse(item.interaction_options || '{}');
+    return opts.status === 'active' ? '进行中' : '已结束';
+  } catch {
+    return '已结束';
+  }
 }
 
 watch(activeSection, (key) => {
@@ -701,12 +712,6 @@ loadAllActivities()
       :draft-id="editingDraftId"
       @published="loadActivities('test')"
       @saved="loadActivities('test')"
-  />
-
-  <PrepImportModal
-      v-model="showPrepImport"
-      :kind="prepImportKind"
-      @selected="onPrepImported"
   />
 
   <AppModal
@@ -1081,6 +1086,7 @@ loadAllActivities()
                   </template>
                   <template v-if="item.type === 'interaction' && item.interaction_kind">
                     · {{ interactionKindLabel(item) }}
+                    · {{ interactionStatusLabel(item) }}
                   </template>
                   <template v-else-if="item.deadline">
                     · 截止 {{ formatDeadline(item.deadline) }}
@@ -1102,6 +1108,12 @@ loadAllActivities()
     </template>
     </div>
   </div>
+
+  <PrepImportModal
+      v-model="showPrepImport"
+      :kind="prepImportKind"
+      @selected="onPrepImported"
+  />
 </template>
 
 <style scoped>

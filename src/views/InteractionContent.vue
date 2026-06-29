@@ -24,6 +24,7 @@ const answerText = ref('');
 const newQuestion = ref('');
 const pollTimer = ref(null);
 const liveSocket = ref(null);
+const courseLiveSocket = ref(null);
 
 const interactionKind = computed(() => detail.value?.interaction_kind || 'qa');
 const voteStats = computed(() => detail.value?.vote_stats ?? []);
@@ -202,9 +203,18 @@ function raceAnswer() {
 
 function subscribeLive() {
   if (!token.value) return;
-  liveSocket.value = connectLiveSocket(`interaction:${activityId.value}`, token.value, () => {
-    loadDetail(true);
+  liveSocket.value = connectLiveSocket(`interaction:${activityId.value}`, token.value, (payload) => {
+    if (payload.type === 'interaction_closed' || payload.type === 'interaction_updated') {
+      loadDetail(true);
+    }
   });
+  if (classId.value) {
+    courseLiveSocket.value = connectLiveSocket(`course:${classId.value}`, token.value, (payload) => {
+      if (payload.type === 'attendance_closed' || payload.type === 'interactions_closed') {
+        loadDetail(true);
+      }
+    });
+  }
 }
 function goBack() {
   router.push({ name: 'courseContent', query: { id: classId.value, section: 'interaction' } }).catch(() => {});
@@ -225,6 +235,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   stopPolling();
   liveSocket.value?.close();
+  courseLiveSocket.value?.close();
 });
 
 watch(isActive, (active) => {

@@ -314,6 +314,7 @@ loadDetail();
             <span class="question-score">{{ q.score ?? 5 }} 分</span>
           </div>
           <div class="question-stem">{{ q.stem }}</div>
+          <img v-if="q.stem_image_url" :src="q.stem_image_url" class="stem-image" alt="题干配图">
 
           <div v-if="q.question_type === 'choice'" class="choice-options">
             <label
@@ -557,6 +558,16 @@ loadDetail();
   color: #1e293b;
   margin-bottom: 14px;
   white-space: pre-wrap;
+}
+
+.stem-image {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  margin-bottom: 14px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  object-fit: contain;
 }
 
 .choice-options {

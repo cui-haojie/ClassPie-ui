@@ -5,8 +5,7 @@ import {useCourseUiStore} from "@/stores/courseUi.js";
 import {storeToRefs} from "pinia";
 import request from "@/utils/request.js";
 import {toast} from '@/utils/toast.js';
-import {ref, reactive, watch} from "vue";
-import {computed} from "vue";
+import {ref, reactive, watch, computed, TransitionGroup} from "vue";
 import {INSTITUTION_OPTIONS, resolveMechanism} from '@/constants/institutions.js';
 import {SEMESTER_OPTIONS, formatSemester, getDefaultSemester} from '@/constants/semesters.js';
 import AppModal from '@/components/AppModal.vue';
@@ -52,6 +51,8 @@ const institutionOptions = INSTITUTION_OPTIONS
 const semesterOptions = SEMESTER_OPTIONS
 const draggingCourseId = ref(null)
 const dragOverCourseId = ref(null)
+const lastDragTargetId = ref(null)
+const orderDirty = ref(false)
 const showJoinModal = ref(false)
 const showCreateModal = ref(false)
 const showChoiceMenu = ref(false)
@@ -106,8 +107,14 @@ const semesterScopedCourses = computed(() => {
   if (selectedSemester.value === 'all') {
     return courses.value
   }
-  return courses.value.filter(course => course.semester === selectedSemester.value)
+  return courses.value.filter(course =>
+      !course.semester || course.semester === selectedSemester.value
+  )
 })
+
+const unpinnedCourses = computed(() =>
+    semesterScopedCourses.value.filter(course => !course.is_pinned)
+)
 
 function getCourseThemeIndex(course) {
   const id = Number(course?.id) || 0;
@@ -124,7 +131,7 @@ function isTeachingCourse(course) {
 }
 
 const filteredCourses = computed(() => {
-  let list = semesterScopedCourses.value
+  let list = unpinnedCourses.value
   if (status.value) {
     if (activeTab.value === 'learn') {
       list = list.filter(course => !isTeachingCourse(course))
@@ -150,11 +157,24 @@ const canDragSort = computed(() =>
     !searchKeyword.value
 )
 
+const isCourseSorting = computed(() => draggingCourseId.value != null)
+
 watch(() => status.value, (val) => {
   if (val === '学生' && activeTab.value === 'teach') {
     activeTab.value = 'all';
   }
 });
+
+watch(courses, (list) => {
+  if (!list.length || selectedSemester.value === 'all') return
+  const matched = list.filter(course =>
+      !course.semester || course.semester === selectedSemester.value
+  )
+  if (!matched.length) {
+    selectedSemester.value = 'all'
+    toast.info('当前学期无课程，已切换为「全部学期」')
+  }
+})
 
 function update() {
   if (!account.value) return Promise.resolve();
@@ -573,36 +593,52 @@ function toTop(courseId) {
 
 function onDragStart(courseId, event) {
   draggingCourseId.value = courseId
+  lastDragTargetId.value = null
+  orderDirty.value = false
   event.dataTransfer.effectAllowed = 'move'
   event.dataTransfer.setData('text/plain', String(courseId))
+  if (event.target?.classList?.contains('course-card')) {
+    event.dataTransfer.setDragImage(event.target, event.offsetX, event.offsetY)
+  }
 }
 
 function onDragOverCourse(courseId, event) {
   event.preventDefault()
-  if (draggingCourseId.value && draggingCourseId.value !== courseId) {
-    dragOverCourseId.value = courseId
-  }
+  event.dataTransfer.dropEffect = 'move'
+  const sourceId = draggingCourseId.value
+  if (!sourceId || sourceId === courseId || lastDragTargetId.value === courseId) return
+  lastDragTargetId.value = courseId
+  dragOverCourseId.value = courseId
+  reorderCoursesInList(sourceId, courseId)
 }
 
-function onDragLeaveCourse() {
+function onDragLeaveCourse(event) {
+  const related = event.relatedTarget
+  if (related && event.currentTarget?.contains(related)) return
   dragOverCourseId.value = null
 }
 
 function onDropCourse(targetCourseId, event) {
   event.preventDefault()
   const sourceId = draggingCourseId.value || Number(event.dataTransfer.getData('text/plain'))
+  if (sourceId && sourceId !== targetCourseId) {
+    reorderCoursesInList(sourceId, targetCourseId)
+  }
   dragOverCourseId.value = null
-  draggingCourseId.value = null
-  if (!sourceId || sourceId === targetCourseId) return
-  reorderCourses(sourceId, targetCourseId)
+  lastDragTargetId.value = null
 }
 
 function onDragEnd() {
+  if (orderDirty.value) {
+    saveCourseOrder(courses.value.map(course => course.id))
+    orderDirty.value = false
+  }
   draggingCourseId.value = null
   dragOverCourseId.value = null
+  lastDragTargetId.value = null
 }
 
-function reorderCourses(sourceId, targetId) {
+function reorderCoursesInList(sourceId, targetId) {
   const fromIndex = courses.value.findIndex(course => course.id === sourceId)
   const toIndex = courses.value.findIndex(course => course.id === targetId)
   if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return
@@ -611,7 +647,13 @@ function reorderCourses(sourceId, targetId) {
   const [moved] = list.splice(fromIndex, 1)
   list.splice(toIndex, 0, moved)
   courses.value = list
-  saveCourseOrder(list.map(course => course.id))
+  orderDirty.value = true
+}
+
+function reorderCourses(sourceId, targetId) {
+  reorderCoursesInList(sourceId, targetId)
+  saveCourseOrder(courses.value.map(course => course.id))
+  orderDirty.value = false
 }
 
 function saveCourseOrder(courseIds) {
@@ -977,14 +1019,22 @@ function restoreCourse(courseId) {
           </span>
         </div>
       </div>
-      <div v-show="courseListVisible" class="container" ref="container" id="top_container">
+      <TransitionGroup
+          v-show="courseListVisible"
+          name="course-sort"
+          tag="div"
+          class="container"
+          :class="{ 'is-sorting': isCourseSorting }"
+          ref="container"
+          id="top_container"
+      >
         <div
             class="course-card"
             v-for="course in filteredCourses"
             :key="course.id"
             :class="{
               'is-dragging': draggingCourseId === course.id,
-              'drag-over': dragOverCourseId === course.id
+              'drag-over': dragOverCourseId === course.id && draggingCourseId !== course.id
             }"
             :draggable="canDragSort"
             @dragstart="onDragStart(course.id, $event)"
@@ -1025,7 +1075,7 @@ function restoreCourse(courseId) {
           </div>
           </div>
         </div>
-      </div>
+      </TransitionGroup>
     </div>
   </div>
 </template>
@@ -1808,6 +1858,31 @@ ul {
   padding: 10px 4px 16px;
 }
 
+.container.is-sorting .course-card:not(.is-dragging):hover {
+  transform: none;
+}
+
+/* 拖拽排序动画 */
+.course-sort-move {
+  transition: transform 0.38s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.course-sort-enter-active,
+.course-sort-leave-active {
+  transition: opacity 0.28s ease, transform 0.28s ease;
+}
+
+.course-sort-enter-from,
+.course-sort-leave-to {
+  opacity: 0;
+  transform: scale(0.92);
+}
+
+.course-sort-leave-active {
+  position: absolute;
+  pointer-events: none;
+}
+
 .course-card {
   background: #fff;
   width: 100%;
@@ -1819,7 +1894,11 @@ ul {
   flex-direction: column;
   overflow: hidden;
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-  transition: transform 0.22s ease, box-shadow 0.22s ease;
+  transition: transform 0.28s cubic-bezier(0.25, 0.8, 0.25, 1),
+              box-shadow 0.28s ease,
+              border-color 0.28s ease,
+              opacity 0.28s ease;
+  will-change: transform;
 }
 
 .course-card:hover {
@@ -1828,13 +1907,26 @@ ul {
 }
 
 .course-card.is-dragging {
-  opacity: 0.55;
-  transform: scale(0.98);
+  opacity: 0.92;
+  transform: scale(1.04) rotate(0.6deg);
+  box-shadow: 0 20px 48px rgba(72, 138, 248, 0.28);
+  border-color: rgb(72, 138, 248);
   cursor: grabbing;
+  z-index: 20;
+}
+
+.course-card.is-dragging:hover {
+  transform: scale(1.04) rotate(0.6deg);
 }
 
 .course-card.drag-over {
-  box-shadow: 0 0 0 2px rgb(72, 138, 248);
+  transform: translateY(-8px) scale(1.02);
+  box-shadow: 0 0 0 2px rgb(72, 138, 248), 0 14px 32px rgba(72, 138, 248, 0.18);
+  border-color: rgb(72, 138, 248);
+}
+
+.container.is-sorting {
+  position: relative;
 }
 
 .drag-handle {

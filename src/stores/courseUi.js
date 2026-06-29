@@ -5,5 +5,7 @@ export const useCourseUiStore = defineStore('courseUi', {
     selectedSemester: 'all',
     activeTab: 'all',
   }),
-  persist: true,
+  persist: {
+    pick: ['activeTab'],
+  },
 })
