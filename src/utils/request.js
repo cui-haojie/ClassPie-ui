@@ -13,7 +13,9 @@ request.interceptors.request.use(config => {
         config.headers['Content-Type'] = 'application/json;charset=UTF-8';
     }
     const accountStore = useAccountStore()
-    if (accountStore.token) {
+    const currentName = router.currentRoute.value.name
+    const isPublicPage = ['login', 'register', 'forget', 'main'].includes(currentName)
+    if (accountStore.token && !isPublicPage) {
         config.headers.Authorization = `Bearer ${accountStore.token}`
     }
     return config;
@@ -35,9 +37,13 @@ request.interceptors.response.use(
         const status = error.response?.status
         if (status === 401) {
             const accountStore = useAccountStore()
+            const currentName = router.currentRoute.value.name
+            const isPublicPage = ['login', 'register', 'forget', 'main'].includes(currentName)
             accountStore.logout()
-            toast.error('登录已过期，请重新登录')
-            router.push({ name: 'login' })
+            if (!isPublicPage) {
+                toast.error('登录已过期，请重新登录')
+                router.push({ name: 'login' })
+            }
         } else if (status === 404) {
             toast.error('未找到请求接口')
         } else if (status === 500) {

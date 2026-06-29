@@ -106,11 +106,12 @@ router.afterEach(() => {
 router.beforeEach((to) => {
   const accountStore = useAccountStore()
   const publicPaths = ['login', 'register', 'forget', 'main']
+  const isLoggedIn = !!(accountStore.account && accountStore.token)
   const needAuth = !publicPaths.includes(to.name)
-  if (needAuth && !accountStore.account) {
+  if (needAuth && !isLoggedIn) {
     return { name: 'login' }
   }
-  if ((to.name === 'login' || to.name === 'register' || to.name === 'forget') && accountStore.account) {
+  if ((to.name === 'login' || to.name === 'register' || to.name === 'forget') && isLoggedIn) {
     return { name: 'mainClass' }
   }
 })
