@@ -13,6 +13,7 @@ import homeworkContent from "@/views/HomeworkContent.vue";
 import ActivityContent from "@/views/ActivityContent.vue";
 import TestContent from "@/views/TestContent.vue";
 import TestEditor from "@/views/TestEditor.vue";
+import InteractionContent from "@/views/InteractionContent.vue";
 import {useAccountStore} from "@/stores/account.js";
 import {unlockBodyScroll} from '@/utils/scrollLock.js';
 
@@ -72,6 +73,21 @@ const router = createRouter({
               path:'/testEditor/:id',
               name: 'testEditor',
               component: TestEditor,
+          },
+          {
+              path:'/interactionContent/:id',
+              name: 'interactionContent',
+              component: InteractionContent,
+          },
+          {
+              path:'/liveClass',
+              name: 'liveClass',
+              component: () => import('@/views/LiveClass.vue'),
+          },
+          {
+              path:'/prepArea',
+              name: 'prepArea',
+              component: () => import('@/views/PrepArea.vue'),
           }
       ]},
         {

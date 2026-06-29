@@ -24,8 +24,18 @@ const loading = ref(true);
 const submitting = ref(false);
 const detail = ref(null);
 const answers = ref({});
+const gradingScores = ref({});
+const gradingStudent = ref(null);
+const gradingAnswers = ref({});
+const aiGrading = ref({});
+const aiComments = ref({});
 
 const activity = computed(() => detail.value?.activity ?? null);
+const answerResults = computed(() => detail.value?.answer_results ?? {});
+const totalScore = computed(() => detail.value?.total_score ?? 0);
+const maxScore = computed(() => detail.value?.max_score ?? 0);
+const isFullyGraded = computed(() => !!detail.value?.is_fully_graded);
+const submissions = computed(() => detail.value?.submissions ?? []);
 const questions = computed(() => detail.value?.questions ?? []);
 const choiceCount = computed(() => detail.value?.choice_count ?? 0);
 const shortCount = computed(() => detail.value?.short_count ?? 0);
@@ -126,6 +136,84 @@ function submitTestPaper() {
       .finally(() => { submitting.value = false; });
 }
 
+function resultLabel(q) {
+  const r = answerResults.value[q.id];
+  if (!r) return '';
+  if (q.question_type === 'choice') return r.is_correct ? '正确' : '错误';
+  if (r.pending) return '待批阅';
+  return `${r.score ?? 0} 分`;
+}
+
+function selectStudentForGrade(item) {
+  gradingStudent.value = item;
+  loadStudentAnswersForGrade(item.account);
+}
+
+function loadStudentAnswersForGrade(studentAccount) {
+  request.post('/editor/getTestDetail', {
+    activity_id: activityId.value,
+    account: studentAccount,
+  }).then(res => {
+    const map = {};
+    const ansMap = {};
+    if (res?.my_answers) {
+      Object.entries(res.my_answers).forEach(([qid, ans]) => {
+        ansMap[Number(qid)] = ans;
+      });
+    }
+    (res?.questions ?? []).filter(q => q.question_type === 'short').forEach(q => {
+      const r = res.answer_results?.[q.id];
+      map[q.id] = r?.score ?? 0;
+    });
+    gradingScores.value = map;
+    gradingAnswers.value = ansMap;
+  });
+}
+
+function saveShortGrade(questionId) {
+  if (!gradingStudent.value) return;
+  const score = Number(gradingScores.value[questionId] ?? 0);
+  request.post('/editor/gradeTestAnswer', {
+    activity_id: activityId.value,
+    student_account: gradingStudent.value.account,
+    question_id: questionId,
+    score,
+    teacher_account: account.value,
+  }).then(ok => {
+    if (ok) {
+      toast.success('评分已保存');
+      loadDetail();
+      loadStudentAnswersForGrade(gradingStudent.value.account);
+    } else {
+      toast.error('评分失败');
+    }
+  });
+}
+
+function suggestShortGrade(questionId) {
+  if (!gradingStudent.value) return;
+  const q = questions.value.find(item => item.id === questionId);
+  if (!q) return;
+  aiGrading.value = { ...aiGrading.value, [questionId]: true };
+  request.post('/editor/ai/suggestTestShortGrade', {
+    teacher_account: account.value,
+    question_stem: q.stem,
+    student_answer: gradingAnswers.value[questionId] || '',
+    max_score: q.score ?? 10,
+  }, { timeout: 90000 }).then(res => {
+    if (res?.available) {
+      gradingScores.value = { ...gradingScores.value, [questionId]: res.suggested_score ?? 0 };
+      aiComments.value = { ...aiComments.value, [questionId]: res.comment || '' };
+      toast.success('AI 建议已填入');
+    } else {
+      toast.warning(res?.message || 'AI 暂不可用');
+    }
+  }).catch(() => toast.error('AI 调用失败'))
+      .finally(() => {
+        aiGrading.value = { ...aiGrading.value, [questionId]: false };
+      });
+}
+
 function goBack() {
   router.push({
     name: 'courseContent',
@@ -164,8 +252,44 @@ loadDetail();
           <span class="summary-chip short">简答题 {{ shortCount }} 题</span>
           <span class="summary-chip total">共 {{ totalCount }} 题</span>
           <span v-if="submitted" class="summary-chip submitted">已提交</span>
+          <span v-if="submitted && !isTeacher" class="summary-chip score">
+            得分 {{ totalScore }} / {{ maxScore }}
+            <template v-if="!isFullyGraded">（简答题待批阅）</template>
+          </span>
         </div>
       </header>
+
+      <section v-if="isTeacher && submissions.length" class="teacher-grade-panel">
+        <h3>学生成绩（{{ submissions.length }} 人交卷）</h3>
+        <div class="submission-table">
+          <div
+              v-for="item in submissions"
+              :key="item.account"
+              class="submission-row"
+              :class="{ active: gradingStudent?.account === item.account }"
+              @click="selectStudentForGrade(item)"
+          >
+            <span class="name">{{ item.account_name || item.account }}</span>
+            <span class="score">{{ item.total_score ?? 0 }} / {{ item.max_score ?? maxScore }}</span>
+            <span class="badge" :class="{ done: item.is_fully_graded }">{{ item.is_fully_graded ? '已批完' : '待批简答' }}</span>
+          </div>
+        </div>
+        <div v-if="gradingStudent" class="grade-short-box">
+          <p class="grade-target">批阅：{{ gradingStudent.account_name || gradingStudent.account }}</p>
+          <div v-for="q in questions.filter(x => x.question_type === 'short')" :key="q.id" class="grade-short-item">
+            <div class="q-title">第 {{ questions.indexOf(q) + 1 }} 题（满分 {{ q.score }}）</div>
+            <div class="q-answer">{{ gradingAnswers[q.id] || '（无答案）' }}</div>
+            <div class="grade-row">
+              <input v-model.number="gradingScores[q.id]" type="number" min="0" :max="q.score" class="field-control grade-input">
+              <button type="button" class="btn-ai" :disabled="aiGrading[q.id]" @click="suggestShortGrade(q.id)">
+                {{ aiGrading[q.id] ? 'AI 分析中…' : 'AI 建议' }}
+              </button>
+              <button type="button" class="btn-grade" @click="saveShortGrade(q.id)">保存</button>
+            </div>
+            <p v-if="aiComments[q.id]" class="ai-comment">AI 评语：{{ aiComments[q.id] }}</p>
+          </div>
+        </div>
+      </section>
 
       <p v-if="isNotStarted && !isTeacher" class="test-tip warn">测试尚未开始，请在开始时间后作答</p>
       <p v-else-if="isOverdue && !submitted && !isTeacher" class="test-tip warn">测试已结束，无法提交</p>
@@ -182,6 +306,11 @@ loadDetail();
           <div class="question-head">
             <span class="question-no">{{ index + 1 }}</span>
             <span class="question-type">{{ questionTypeLabel(q.question_type) }}</span>
+            <span v-if="submitted && answerResults[q.id]" class="result-badge" :class="{
+              ok: q.question_type === 'choice' && answerResults[q.id].is_correct,
+              bad: q.question_type === 'choice' && answerResults[q.id].is_correct === false,
+              pending: answerResults[q.id].pending,
+            }">{{ resultLabel(q) }}</span>
             <span class="question-score">{{ q.score ?? 5 }} 分</span>
           </div>
           <div class="question-stem">{{ q.stem }}</div>
@@ -193,7 +322,8 @@ loadDetail();
                 class="choice-option"
                 :class="{
                   selected: answers[q.id] === opt,
-                  correct: isTeacher && q.correct_option === opt,
+                  correct: (isTeacher || submitted) && q.correct_option === opt,
+                  wrong: submitted && answers[q.id] === opt && q.correct_option && q.correct_option !== opt,
                 }"
             >
               <input
@@ -316,6 +446,47 @@ loadDetail();
 .summary-chip.short { background: #f0fdf4; color: #15803d; }
 .summary-chip.total { background: #f1f5f9; color: #475569; }
 .summary-chip.submitted { background: #fef3c7; color: #b45309; }
+.summary-chip.score { background: #fce7f3; color: #be185d; font-weight: 700; }
+
+.teacher-grade-panel {
+  background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+  padding: 16px 18px; margin-bottom: 20px;
+}
+.teacher-grade-panel h3 { margin: 0 0 12px; font-size: 15px; }
+.submission-table { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.submission-row {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer;
+}
+.submission-row.active { border-color: #488af8; background: #eff6ff; }
+.submission-row .name { flex: 1; font-weight: 600; }
+.submission-row .score { color: #64748b; font-size: 14px; }
+.badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #fef3c7; color: #b45309; }
+.badge.done { background: #dcfce7; color: #15803d; }
+.grade-short-box { border-top: 1px solid #e2e8f0; padding-top: 14px; }
+.grade-target { font-weight: 600; margin-bottom: 10px; }
+.grade-short-item { margin-bottom: 14px; padding: 12px; background: #f8fafc; border-radius: 8px; }
+.q-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.q-answer { white-space: pre-wrap; font-size: 14px; color: #334155; margin-bottom: 8px; }
+.grade-row { display: flex; gap: 8px; align-items: center; }
+.grade-input { max-width: 80px; }
+.btn-grade {
+  padding: 6px 14px; background: #488af8; color: #fff; border: none;
+  border-radius: 8px; cursor: pointer; font-size: 13px;
+}
+.btn-ai {
+  padding: 6px 14px; background: #8b5cf6; color: #fff; border: none;
+  border-radius: 8px; cursor: pointer; font-size: 13px;
+}
+.btn-ai:disabled { opacity: 0.6; cursor: not-allowed; }
+.ai-comment { margin: 8px 0 0; font-size: 13px; color: #6d28d9; line-height: 1.5; }
+.result-badge {
+  font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+}
+.result-badge.ok { background: #dcfce7; color: #15803d; }
+.result-badge.bad { background: #fee2e2; color: #b91c1c; }
+.result-badge.pending { background: #fef3c7; color: #b45309; }
+.choice-option.wrong { border-color: #fca5a5; background: #fef2f2; }
 
 .test-tip {
   padding: 10px 14px;

@@ -10,6 +10,7 @@ import {computed} from "vue";
 import {INSTITUTION_OPTIONS, resolveMechanism} from '@/constants/institutions.js';
 import {SEMESTER_OPTIONS, formatSemester, getDefaultSemester} from '@/constants/semesters.js';
 import AppModal from '@/components/AppModal.vue';
+import ClassTimePicker from '@/components/ClassTimePicker.vue';
 import {appConfirm} from '@/utils/confirm.js';
 
 const router = useRouter();
@@ -41,6 +42,10 @@ const newClassInstitution = ref('')
 const newClassCustomMechanism = ref('')
 const importExcelFile = ref(null)
 const excelInputRef = ref(null)
+const classImportExcelFile = ref(null)
+const classExcelInputRef = ref(null)
+const batchClassInstitution = ref('')
+const batchClassCustomMechanism = ref('')
 const classToAdd = ref('')
 const importTargetClassId = ref('')
 const institutionOptions = INSTITUTION_OPTIONS
@@ -271,6 +276,7 @@ function createClass() {
   showChoiceMenu.value = false;
   loadSchoolClasses();
   newClassInstitution.value = mechanism.value || '';
+  batchClassInstitution.value = mechanism.value || '';
   resetCreateForm();
   showCreateModal.value = true;
 }
@@ -343,6 +349,66 @@ function resetExcelInput() {
 
 function downloadImportTemplate() {
   window.open('/editor/downloadStudentImportTemplate', '_blank')
+}
+
+function downloadClassImportTemplate() {
+  window.open('/editor/downloadSchoolClassImportTemplate', '_blank')
+}
+
+function onClassExcelFileChange(event) {
+  classImportExcelFile.value = event.target.files?.[0] || null
+}
+
+function resetClassExcelInput() {
+  classImportExcelFile.value = null
+  if (classExcelInputRef.value) {
+    classExcelInputRef.value.value = ''
+  }
+}
+
+function resolveBatchClassMechanism() {
+  return resolveMechanism(batchClassInstitution.value, batchClassCustomMechanism.value) || mechanism.value || ''
+}
+
+function importSchoolClassesBatch() {
+  if (!classImportExcelFile.value) {
+    toast.warning('请先选择班级 Excel 文件')
+    return
+  }
+  const defaultMechanism = resolveBatchClassMechanism()
+  const formData = new FormData()
+  formData.append('file', classImportExcelFile.value)
+  formData.append('teacher_account', account.value)
+  if (defaultMechanism) {
+    formData.append('default_mechanism', defaultMechanism)
+  }
+  return request.post('/editor/importSchoolClasses', formData, { timeout: 60000 })
+      .then(res => {
+        const summary = `班级导入完成：新建 ${res.created || 0} 个，跳过 ${res.skipped || 0} 个，失败 ${res.failed || 0} 个`
+        if ((res.failed || 0) > 0) {
+          toast.warning(summary)
+        } else {
+          toast.success(summary)
+        }
+        if (res.messages?.length) {
+          console.log('班级导入详情：', res.messages)
+          if (res.messages.length <= 3) {
+            res.messages.forEach(msg => toast.info(msg))
+          } else {
+            toast.info(`另有 ${res.messages.length} 条详情，请查看控制台`)
+          }
+        }
+        if (Array.isArray(res.created_ids)) {
+          res.created_ids.forEach(id => {
+            if (!selectedSchoolClassIds.value.includes(id)) {
+              selectedSchoolClassIds.value = [...selectedSchoolClassIds.value, id]
+            }
+          })
+        }
+        resetClassExcelInput()
+        loadSchoolClasses()
+      })
+      .catch(err => toast.error('导入失败：' + (err.message || '请检查文件格式')))
 }
 
 function importStudentsExcel(schoolClassId) {
@@ -426,7 +492,10 @@ function resetCreateForm() {
   importTargetClassId.value = '';
   newClassName.value = '';
   newClassCustomMechanism.value = '';
+  batchClassInstitution.value = mechanism.value || '';
+  batchClassCustomMechanism.value = '';
   resetExcelInput();
+  resetClassExcelInput();
 }
 
 function kill2() {
@@ -677,14 +746,10 @@ function restoreCourse(courseId) {
             </option>
           </select>
         </label>
-        <label class="form-field">
+        <div class="form-field">
           <span class="field-label">上课时间</span>
-          <textarea
-              v-model="createForm.class_time"
-              class="field-control schedule-textarea"
-              placeholder="可填多个时段，用顿号或换行分隔&#10;例如：周一 1-2 节、周三 3-4 节"
-          ></textarea>
-        </label>
+          <ClassTimePicker v-model="createForm.class_time" />
+        </div>
         <label class="form-field form-field-full">
           <span class="field-label">教学班级展示名</span>
           <input v-model="createForm.selected_classes" type="text" class="field-control" placeholder="可留空，将自动使用行政班名称">
@@ -736,6 +801,34 @@ function restoreCourse(courseId) {
         <span class="field-label">其他学校名称</span>
         <input v-model="newClassCustomMechanism" type="text" class="field-control" placeholder="请输入学校/机构名称">
       </label>
+    </section>
+
+    <section class="form-section form-section-muted">
+      <h3 class="section-title">Excel 批量创建班级</h3>
+      <div class="import-panel">
+        <div class="import-panel-row">
+          <label class="form-field">
+            <span class="field-label">默认所属学校</span>
+            <select v-model="batchClassInstitution" class="field-control field-select">
+              <option value="">使用教师账号学校 / Excel 内填写</option>
+              <option v-for="item in institutionOptions" :key="'batch-' + item.value" :value="item.value">{{ item.label }}</option>
+            </select>
+          </label>
+          <label class="form-field file-field">
+            <span class="field-label">班级名单</span>
+            <input ref="classExcelInputRef" type="file" accept=".xlsx,.xls" class="field-control file-control" @change="onClassExcelFileChange">
+          </label>
+        </div>
+        <label v-if="batchClassInstitution === '__other__'" class="form-field">
+          <span class="field-label">其他学校名称</span>
+          <input v-model="batchClassCustomMechanism" type="text" class="field-control" placeholder="未在 Excel 填写学校时将使用此名称">
+        </label>
+        <div class="import-panel-actions">
+          <button type="button" class="btn-text" @click="downloadClassImportTemplate">下载班级模板</button>
+          <button type="button" class="btn-primary" @click="importSchoolClassesBatch">批量创建班级</button>
+        </div>
+        <p class="import-tip">模板列：班级名称（必填）、所属学校（选填，可留空并使用上方默认学校）</p>
+      </div>
     </section>
 
     <section class="form-section form-section-muted">
@@ -857,6 +950,7 @@ function restoreCourse(courseId) {
         </div>
       </div>
       <div class="right">
+        <button v-if="status === '老师'" class="manage" @click="router.push({ name: 'prepArea' })">备课区</button>
         <button v-if="status === '老师'" class="manage" @click="openArchiveModal">归档管理</button>
         <div class="search-wrapper">
           <input class='search' type="text" placeholder="搜索我学的课程" v-model="searchKeyword" @input="handleSearch">

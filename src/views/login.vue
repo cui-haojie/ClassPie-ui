@@ -90,6 +90,7 @@ function loginBut() {
   }).then(response => {
     if (response && response.account) {
       accountStore.setAccount(response.account, {
+        token: response.token,
         avatar_url: response.avatar_url,
         name: response.name,
       });

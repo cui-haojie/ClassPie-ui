@@ -2,12 +2,16 @@
 import {useRoute,useRouter} from "vue-router";
 import {useAccountStore} from "@/stores/account.js";
 import {storeToRefs} from "pinia";
-import {ref, computed, watch} from "vue";
+import {ref, computed, watch, onMounted, onBeforeUnmount} from "vue";
 import request from "@/utils/request.js";
 import {toast} from '@/utils/toast.js';
 import {SEMESTER_OPTIONS, formatSemester} from '@/constants/semesters.js';
 import AppModal from '@/components/AppModal.vue';
 import TestPublishModal from '@/components/TestPublishModal.vue';
+import InteractionPublishModal from '@/components/InteractionPublishModal.vue';
+import PrepImportModal from '@/components/PrepImportModal.vue';
+import ClassTimePicker from '@/components/ClassTimePicker.vue';
+import SchoolClassPicker from '@/components/SchoolClassPicker.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import {formatDateTime, formatDeadline, homeworkStatusLabel, isHomeworkOverdue, normalizeDeadlineInput, testStatusLabel} from '@/utils/homeworkDeadline.js';
 import { parseClassTimeSlots } from '@/utils/courseSchedule.js';
@@ -54,6 +58,10 @@ const showEditCourse = ref(false)
 const showHomeworkModal = ref(false)
 const showActivityModal = ref(false)
 const showTestPublishModal = ref(false)
+const showInteractionModal = ref(false)
+const showPrepImport = ref(false)
+const prepImportKind = ref('homework')
+const importedPrepId = ref(null)
 const editingDraftId = ref(null)
 const activityForm = ref({ title: '', content: '', start_time: '', deadline: '', attachment_url: '', attachment_name: '' })
 const currentActivityType = ref('interaction')
@@ -71,14 +79,25 @@ const activityCounts = ref({
   test: 0,
   announcement: 0,
 })
+const gradeBook = ref(null)
+const gradeWeightForm = ref({
+  homework_weight: 35,
+  test_weight: 35,
+  attendance_weight: 20,
+  interaction_weight: 10,
+})
+const showGradeWeightEditor = ref(false)
+const openAttendance = ref(null)
+let attendancePollTimer = null
 
 const sectionTabs = [
-  { key: 'interaction', label: '课程互动', type: 'interaction', addLabel: '添加互动', icon: '互', desc: '签到、投票、问答等课堂互动' },
+  { key: 'interaction', label: '课程互动', type: 'interaction', addLabel: '开启互动', icon: '互', desc: '课堂实时问答、随机点名，开启后通知全班' },
   { key: 'topic', label: '话题', type: 'topic', addLabel: '发起话题', icon: '话', desc: '课程讨论与交流' },
   { key: 'material', label: '资料', type: 'material', addLabel: '添加资料', icon: '资', desc: '课件、文档、参考资料' },
   { key: 'test', label: '测试', type: 'test', addLabel: '发布测试', icon: '测', desc: '随堂测验与练习' },
   { key: 'announcement', label: '公告', type: 'announcement', addLabel: '发布公告', icon: '告', desc: '课程通知与重要说明' },
   { key: 'homework', label: '作业', type: null, addLabel: '添加作业', icon: '作', desc: '' },
+  { key: 'grades', label: '成绩册', type: null, addLabel: '', icon: '绩', desc: '作业、测试、考勤与互动综合统计' },
   { key: 'members', label: '成员', type: null, addLabel: '', icon: '', desc: '' },
 ]
 
@@ -91,6 +110,7 @@ const activeTabMeta = computed(() => sectionTabs.find(t => t.key === activeSecti
 
 const sectionCountLabel = computed(() => {
   if (activeSection.value === 'members') return ''
+  if (activeSection.value === 'grades') return gradeBook.value ? `共 ${gradeBook.value.student_count} 名学生` : ''
   if (activeSection.value === 'homework') return `共 ${num.value} 个活动`
   const type = activeTabMeta.value.type
   if (type) return `共 ${activityCounts.value[type] ?? 0} 个活动`
@@ -100,6 +120,7 @@ const sectionCountLabel = computed(() => {
 const isActivitySection = computed(() => !!activeTabMeta.value.type)
 const classTimeSlots = computed(() => parseClassTimeSlots(class_time.value))
 const editForm = ref({ class_name: '', class_time: '', selected_classes: '', semester: '' })
+const editSchoolClassIds = ref([])
 const semesterOptions = SEMESTER_OPTIONS
 
 request.post("/editor/account",{account: account.value})
@@ -150,6 +171,9 @@ request.post("/editor/getCourseById", {id: course_id.value})
         selected_classes: resSelectedClasses,
         semester: res.semester || '',
       }
+      editSchoolClassIds.value = Array.isArray(res.school_class_ids)
+          ? res.school_class_ids.map(Number)
+          : (res.school_class_id ? [Number(res.school_class_id)] : [])
     })
 
 function loadMembers() {
@@ -175,6 +199,7 @@ function saveCourseEdit() {
     class_time: editForm.value.class_time,
     selected_classes: editForm.value.selected_classes,
     semester: editForm.value.semester,
+    school_class_ids: editSchoolClassIds.value.map(Number),
   }).then(ok => {
     if (ok) {
       toast.success('课程信息已更新')
@@ -183,6 +208,7 @@ function saveCourseEdit() {
       class_time.value = editForm.value.class_time
       selected_classes.value = editForm.value.selected_classes
       semester.value = editForm.value.semester
+      loadMembers()
     }
   })
 }
@@ -192,11 +218,13 @@ request.post("/editor/getCountById", {id: course_id.value})
 })
 
 function addHomework(){
+  importedPrepId.value = null;
   showHomeworkModal.value = true;
 }
 
 function cancel() {
   showHomeworkModal.value = false;
+  importedPrepId.value = null;
   title_2.value = '';
   bigInput.value = '';
   deadline.value = '';
@@ -280,6 +308,24 @@ const homework = computed(() => ({
 
 function confirmHomework() {
   if (checkType()) {
+    if (importedPrepId.value) {
+      request.post('/editor/publishPrepToCourse', {
+        prep_id: importedPrepId.value,
+        class_id: Number(course_id.value),
+        teacher_account: account.value,
+        deadline: normalizeDeadlineInput(deadline.value),
+        homework_type: type.value,
+      }).then(res => {
+        if (res) {
+          toast.success('作业已从备课区发布');
+          cancel();
+          loadHomework();
+        } else {
+          toast.error('发布失败，请检查截止时间');
+        }
+      }).catch(() => toast.error('发布失败'));
+      return;
+    }
     const formData = new FormData();
     formData.append('class_id', String(Number(course_id.value)));
     formData.append('name', title_2.value.trim());
@@ -356,7 +402,69 @@ function switchSection(key) {
   activeSection.value = key
   const tab = sectionTabs.find(t => t.key === key)
   if (tab?.type) loadActivities(tab.type)
+  if (key === 'grades') loadGradeBook()
 }
+
+function loadGradeBook() {
+  if (status.value !== '老师') return
+  request.post('/editor/getCourseGradeBook', { class_id: Number(course_id.value) }).then(res => {
+    gradeBook.value = res
+    if (res?.weights) {
+      gradeWeightForm.value = { ...res.weights }
+    }
+  })
+}
+
+const gradeWeightSum = computed(() => {
+  const w = gradeWeightForm.value
+  return Number(w.homework_weight || 0)
+      + Number(w.test_weight || 0)
+      + Number(w.attendance_weight || 0)
+      + Number(w.interaction_weight || 0)
+})
+
+function saveGradeWeights() {
+  if (gradeWeightSum.value !== 100) {
+    toast.warning('四项权重之和必须等于 100')
+    return
+  }
+  request.put('/editor/updateCourseGradeWeight', {
+    class_id: Number(course_id.value),
+    teacher_account: account.value,
+    ...gradeWeightForm.value,
+  }).then(ok => {
+    if (ok) {
+      toast.success('成绩权重已保存')
+      showGradeWeightEditor.value = false
+      loadGradeBook()
+    } else {
+      toast.error('保存失败，请确认您有权限设置本课程权重')
+    }
+  }).catch(() => toast.error('保存失败'))
+}
+
+function goLiveClass() {
+  router.push({ name: 'liveClass', query: { id: course_id.value } })
+}
+
+function loadOpenAttendance() {
+  if (!course_id.value) return Promise.resolve()
+  return request.post('/editor/getOpenAttendance', {
+    class_id: Number(course_id.value),
+    account: account.value,
+  }).then(res => {
+    openAttendance.value = res?.id ? res : null
+  }).catch(() => {})
+}
+
+onMounted(() => {
+  loadOpenAttendance()
+  attendancePollTimer = setInterval(loadOpenAttendance, 15000)
+})
+
+onBeforeUnmount(() => {
+  if (attendancePollTimer) clearInterval(attendancePollTimer)
+})
 
 const activityAttachmentFile = ref(null);
 const activityAttachmentInputRef = ref(null);
@@ -387,11 +495,16 @@ function openAddActivity() {
     toast.warning('仅教师可发布')
     return
   }
+  importedPrepId.value = null
   const tab = activeTabMeta.value
   if (!tab.type) return
   if (tab.type === 'test') {
     editingDraftId.value = null
     showTestPublishModal.value = true
+    return
+  }
+  if (tab.type === 'interaction') {
+    showInteractionModal.value = true
     return
   }
   currentActivityType.value = tab.type
@@ -405,8 +518,27 @@ function confirmActivity() {
     toast.warning('请填写标题')
     return
   }
-  if (currentActivityType.value === 'material' && !activityAttachmentFile.value && !activityForm.value.attachment_url.trim()) {
+  if (currentActivityType.value === 'material' && !importedPrepId.value
+      && !activityAttachmentFile.value && !activityForm.value.attachment_url.trim()) {
     toast.warning('请上传资料文件或填写资料链接')
+    return
+  }
+  if (importedPrepId.value) {
+    request.post('/editor/publishPrepToCourse', {
+      prep_id: importedPrepId.value,
+      class_id: class_id,
+      teacher_account: account.value,
+    }).then(ok => {
+      if (ok) {
+        toast.success('已从备课区发布')
+        showActivityModal.value = false
+        importedPrepId.value = null
+        clearActivityAttachment()
+        loadActivities(currentActivityType.value)
+      } else {
+        toast.error('发布失败')
+      }
+    }).catch(() => toast.error('发布失败'))
     return
   }
   const formData = new FormData();
@@ -436,6 +568,61 @@ function confirmActivity() {
       }).catch(() => toast.error('发布失败'))
 }
 
+function openPrepImport(kind) {
+  prepImportKind.value = kind
+  showPrepImport.value = true
+}
+
+function onPrepImported(detail) {
+  importedPrepId.value = detail.id
+  if (detail.kind === 'homework') {
+    title_2.value = detail.title || ''
+    bigInput.value = detail.content || ''
+    if (detail.homework_type === '团队作业') {
+      checkedOptions.value = { personal: false, team: true }
+      lastSelected.value = 'team'
+    } else {
+      checkedOptions.value = { personal: true, team: false }
+      lastSelected.value = 'personal'
+    }
+    deadline.value = detail.deadline || ''
+    showHomeworkModal.value = true
+    toast.success('已导入备课内容，可修改后发布')
+    return
+  }
+  if (['topic', 'material', 'announcement'].includes(detail.kind)) {
+    currentActivityType.value = detail.kind
+    activityForm.value = {
+      title: detail.title || '',
+      content: detail.content || '',
+      start_time: '',
+      deadline: '',
+      attachment_url: detail.attachment_url || '',
+      attachment_name: detail.attachment_name || '',
+    }
+    showActivityModal.value = true
+    toast.success('已导入备课内容，确认后即可发布')
+  }
+  if (detail.kind === 'test') {
+    importedPrepId.value = detail.id
+    request.post('/editor/publishPrepToCourse', {
+      prep_id: detail.id,
+      class_id: class_id,
+      teacher_account: account.value,
+      start_time: detail.start_time,
+      deadline: detail.deadline,
+    }).then(ok => {
+      if (ok) {
+        toast.success('测试已从备课区发布')
+        importedPrepId.value = null
+        loadActivities('test')
+      } else {
+        toast.error('发布失败，请先在备课区设置测试时间')
+      }
+    }).catch(() => toast.error('发布失败'))
+  }
+}
+
 function openActivityDetail(item) {
   const activityId = item?.id ?? item?.activity_id;
   if (!activityId) {
@@ -458,6 +645,14 @@ function openActivityDetail(item) {
     }).catch(() => {});
     return;
   }
+  if (item.type === 'interaction') {
+    router.push({
+      name: 'interactionContent',
+      params: { id: String(activityId) },
+      query: { classId: course_id.value },
+    }).catch(() => {});
+    return;
+  }
   router.push({
     name: 'activityContent',
     params: { id: String(activityId) },
@@ -473,7 +668,13 @@ function replyCountLabel(item) {
     if (item.publish_status === 'draft') return '草稿 · 继续编辑';
     return `${count} 人已交卷`;
   }
+  if (type === 'interaction') return `${count} 人已参与`;
   return `${count} 条讨论`;
+}
+
+function interactionKindLabel(item) {
+  if (item.interaction_kind === 'qa') return '课堂问答';
+  return '课堂互动';
 }
 
 watch(activeSection, (key) => {
@@ -486,6 +687,13 @@ loadAllActivities()
 </script>
 
 <template>
+  <InteractionPublishModal
+      v-model="showInteractionModal"
+      :class-id="class_id"
+      :creator-account="account"
+      @published="loadActivities('interaction')"
+  />
+
   <TestPublishModal
       v-model="showTestPublishModal"
       :class-id="class_id"
@@ -493,6 +701,12 @@ loadAllActivities()
       :draft-id="editingDraftId"
       @published="loadActivities('test')"
       @saved="loadActivities('test')"
+  />
+
+  <PrepImportModal
+      v-model="showPrepImport"
+      :kind="prepImportKind"
+      @selected="onPrepImported"
   />
 
   <AppModal
@@ -526,6 +740,9 @@ loadAllActivities()
               {{ activityAttachmentFile.name }}
               <button type="button" class="attachment-remove" @click="clearActivityAttachment">移除</button>
             </span>
+            <span v-else-if="importedPrepId && activityForm.attachment_name" class="attachment-selected">
+              备课附件：{{ activityForm.attachment_name }}
+            </span>
             <span v-else class="attachment-hint">支持 PDF、Office、图片、压缩包等，最大 10MB</span>
           </div>
         </label>
@@ -540,7 +757,8 @@ loadAllActivities()
       </template>
     </div>
     <template #footer>
-      <button type="button" class="btn-ghost" @click="showActivityModal=false">取消</button>
+      <button type="button" class="btn-ghost" @click="showActivityModal=false; importedPrepId=null">取消</button>
+      <button v-if="status === '老师'" type="button" class="btn-ghost" @click="openPrepImport(currentActivityType)">从备课区导入</button>
       <button type="button" class="btn-primary" @click="confirmActivity">确认发布</button>
     </template>
   </AppModal>
@@ -596,11 +814,12 @@ loadAllActivities()
     </div>
     <template #footer>
       <button type="button" class="btn-ghost" @click="cancel">取消</button>
+      <button v-if="status === '老师'" type="button" class="btn-ghost" @click="openPrepImport('homework')">从备课区导入</button>
       <button type="button" class="btn-primary" @click="confirmHomework">确认发布</button>
     </template>
   </AppModal>
 
-  <AppModal v-model="showEditCourse" title="编辑课程" subtitle="更新课程基本信息" size="md">
+  <AppModal v-model="showEditCourse" title="编辑课程" subtitle="更新课程基本信息与关联行政班" size="lg">
     <div class="edit-form">
       <label class="form-field">
         <span class="field-label">课程名称</span>
@@ -612,18 +831,19 @@ loadAllActivities()
           <option v-for="item in semesterOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
         </select>
       </label>
-      <label class="form-field">
+      <div class="form-field">
         <span class="field-label">上课时间</span>
-        <textarea
-            v-model="editForm.class_time"
-            class="field-control field-textarea field-textarea-sm schedule-input"
-            placeholder="可填多个时段，用顿号或换行分隔&#10;例如：周一 1-2 节、周三 3-4 节、周五 5-6 节"
-        ></textarea>
-      </label>
+        <ClassTimePicker v-model="editForm.class_time" />
+      </div>
       <label class="form-field">
-        <span class="field-label">教学班级</span>
-        <input v-model="editForm.selected_classes" placeholder="教学班级" class="field-control"/>
+        <span class="field-label">教学班级展示名</span>
+        <input v-model="editForm.selected_classes" placeholder="可留空，将自动使用行政班名称" class="field-control"/>
       </label>
+      <div class="form-field">
+        <span class="field-label">关联行政班</span>
+        <p class="field-hint">修改后，新关联行政班中的学生会自动加入本课程</p>
+        <SchoolClassPicker v-model="editSchoolClassIds" />
+      </div>
     </div>
     <template #footer>
       <button type="button" class="btn-ghost" @click="showEditCourse=false">取消</button>
@@ -653,14 +873,33 @@ loadAllActivities()
             </template>
           </div>
         </div>
-        <button
-            v-if="status === '老师'"
-            type="button"
-            class="btn-edit-course"
-            @click="openEditCourse"
-        >
-          编辑课程
-        </button>
+        <div class="course-hero-actions">
+          <button
+              v-if="status === '老师'"
+              type="button"
+              class="btn-live-class"
+              @click="goLiveClass"
+          >
+            开始上课
+          </button>
+          <button
+              v-else
+              type="button"
+              class="btn-live-class"
+              :class="{ pulse: openAttendance }"
+              @click="goLiveClass"
+          >
+            {{ openAttendance ? '立即签到' : '进入课堂' }}
+          </button>
+          <button
+              v-if="status === '老师'"
+              type="button"
+              class="btn-edit-course"
+              @click="openEditCourse"
+          >
+            编辑课程
+          </button>
+        </div>
       </div>
       <nav class="course-tabs" aria-label="课程内容">
         <button
@@ -676,8 +915,78 @@ loadAllActivities()
       </nav>
     </div>
 
+    <div v-if="status !== '老师' && openAttendance" class="attendance-banner" @click="goLiveClass">
+      <span class="attendance-banner-dot" />
+      <span>老师已发起签到，点击进入输入签到码</span>
+      <span class="attendance-banner-action">去签到 →</span>
+    </div>
+
     <div class="course-body">
-    <div v-if="activeSection==='members'" class="members-panel">
+    <div v-if="activeSection==='grades'" class="grades-panel">
+      <div class="mid_container">
+        <div id="acts">过程性评价 · 共 {{ gradeBook?.student_count || 0 }} 名学生</div>
+        <div v-if="status === '老师'" class="grades-actions">
+          <button type="button" class="btn-add-activity" @click="showGradeWeightEditor = !showGradeWeightEditor">
+            {{ showGradeWeightEditor ? '收起权重' : '设置权重' }}
+          </button>
+          <button type="button" class="btn-add-activity" @click="loadGradeBook">刷新</button>
+        </div>
+      </div>
+
+      <div v-if="gradeBook?.weights" class="grade-weight-summary">
+        当前权重：作业 {{ gradeBook.weights.homework_weight }}% ·
+        测试 {{ gradeBook.weights.test_weight }}% ·
+        出勤 {{ gradeBook.weights.attendance_weight }}% ·
+        互动 {{ gradeBook.weights.interaction_weight }}%
+      </div>
+
+      <div v-if="status === '老师' && showGradeWeightEditor" class="grade-weight-editor">
+        <p class="grade-weight-hint">设置综合分计算权重，四项之和须为 100。多次作业/测试取各自均分后加权。</p>
+        <div class="grade-weight-grid">
+          <label class="grade-weight-field">
+            <span>作业权重 (%)</span>
+            <input v-model.number="gradeWeightForm.homework_weight" type="number" min="0" max="100" class="field-control">
+          </label>
+          <label class="grade-weight-field">
+            <span>测试权重 (%)</span>
+            <input v-model.number="gradeWeightForm.test_weight" type="number" min="0" max="100" class="field-control">
+          </label>
+          <label class="grade-weight-field">
+            <span>出勤权重 (%)</span>
+            <input v-model.number="gradeWeightForm.attendance_weight" type="number" min="0" max="100" class="field-control">
+          </label>
+          <label class="grade-weight-field">
+            <span>互动权重 (%)</span>
+            <input v-model.number="gradeWeightForm.interaction_weight" type="number" min="0" max="100" class="field-control">
+          </label>
+        </div>
+        <div class="grade-weight-footer">
+          <span :class="{ invalid: gradeWeightSum !== 100 }">当前合计：{{ gradeWeightSum }}%</span>
+          <button type="button" class="btn-primary" :disabled="gradeWeightSum !== 100" @click="saveGradeWeights">保存权重</button>
+        </div>
+      </div>
+
+      <table v-if="gradeBook?.rows?.length" class="grade-table">
+        <thead>
+          <tr>
+            <th>账号</th><th>姓名</th><th>作业</th><th>测试</th><th>出勤</th><th>互动</th><th>综合</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in gradeBook.rows" :key="row.account">
+            <td>{{ row.account }}</td>
+            <td>{{ row.name }}</td>
+            <td>{{ row.homework_avg }}</td>
+            <td>{{ row.test_avg }}</td>
+            <td>{{ row.attendance_rate }}%</td>
+            <td>{{ row.interaction_count }}</td>
+            <td>{{ row.composite_score }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="empty-tip">暂无成绩数据，发布作业/测试并开展签到后可查看。</p>
+    </div>
+    <div v-else-if="activeSection==='members'" class="members-panel">
       <div class="member-row member-header">
         <span></span><span>成员</span><span>账号</span><span>角色</span><span>学号</span>
       </div>
@@ -729,6 +1038,12 @@ loadAllActivities()
         <div id="acts">{{ sectionCountLabel }}</div>
         <div v-if="status === '老师'" class="teacher_create activity-add-wrap">
           <button class="btn-add-activity" @click="openAddActivity">＋ {{ activeTabMeta.addLabel }}</button>
+          <button
+              v-if="activeTabMeta.type && activeTabMeta.type !== 'interaction'"
+              type="button"
+              class="btn-add-activity btn-prep-import"
+              @click="openPrepImport(activeTabMeta.type === 'test' ? 'test' : currentActivityType || activeTabMeta.type)"
+          >从备课区导入</button>
         </div>
       </div>
       <div class="homeworks_container">
@@ -761,8 +1076,11 @@ loadAllActivities()
                     · {{ formatDeadline(item.start_time) }} 至 {{ formatDeadline(item.deadline) }}
                     · {{ testStatusLabel(item.start_time, item.deadline) }}
                   </template>
-                  <template v-if="item.type === 'test' && (item.choice_count || item.short_count)">
+                  <template v-else-if="item.type === 'test' && (item.choice_count || item.short_count)">
                     · 选择题 {{ item.choice_count ?? 0 }} · 简答题 {{ item.short_count ?? 0 }}
+                  </template>
+                  <template v-if="item.type === 'interaction' && item.interaction_kind">
+                    · {{ interactionKindLabel(item) }}
                   </template>
                   <template v-else-if="item.deadline">
                     · 截止 {{ formatDeadline(item.deadline) }}
@@ -874,6 +1192,157 @@ loadAllActivities()
   font-size: 13px;
   backdrop-filter: blur(4px);
 }
+
+.btn-edit-course {
+  flex-shrink: 0;
+}
+
+.course-hero-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.btn-live-class {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 10px;
+  background: #ef4444;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-live-class.pulse {
+  animation: attendance-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes attendance-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45); }
+  50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+}
+
+.attendance-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  cursor: pointer;
+}
+
+.attendance-banner-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  flex-shrink: 0;
+}
+
+.attendance-banner-action {
+  margin-left: auto;
+  font-weight: 600;
+}
+
+.grades-panel .grade-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+}
+
+.grades-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.grade-weight-summary {
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  background: #f8fbff;
+  border-radius: 8px;
+  color: #475569;
+  font-size: 14px;
+}
+
+.grade-weight-editor {
+  margin-bottom: 16px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.grade-weight-hint {
+  margin: 0 0 12px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.grade-weight-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.grade-weight-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #334155;
+}
+
+.grade-weight-field .field-control {
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+}
+
+.grade-weight-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+}
+
+.grade-weight-footer .invalid {
+  color: #dc2626;
+}
+
+.grade-weight-footer .btn-primary {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: #488af8;
+  color: #fff;
+  cursor: pointer;
+}
+
+.grade-weight-footer .btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .grade-weight-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.grades-panel .grade-table th,
+.grades-panel .grade-table td {
+  border: 1px solid #e2e8f0;
+  padding: 10px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.empty-tip { color: #64748b; padding: 16px 0; }
 
 .btn-edit-course {
   flex-shrink: 0;
@@ -1106,6 +1575,12 @@ loadAllActivities()
   display: block;
 }
 
+.field-hint {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #64748b;
+}
+
 .homework-type-row {
   display: flex;
   align-items: center;
@@ -1133,6 +1608,14 @@ loadAllActivities()
 .activity-add-wrap {
   margin-left: auto;
   margin-right: 0;
+  display: flex;
+  gap: 8px;
+}
+
+.btn-prep-import {
+  background: #fff;
+  color: #488af8;
+  border: 1px solid #488af8;
 }
 
 .activity-box {

@@ -20,6 +20,10 @@ const classId = ref(route.query.classId || '');
 const loading = ref(true);
 const saving = ref(false);
 const publishing = ref(false);
+const aiGenerating = ref(false);
+const aiTopic = ref('');
+const aiChoiceCount = ref(3);
+const aiShortCount = ref(1);
 
 const form = ref({ title: '', content: '', start_time: '', deadline: '' });
 const questions = ref([]);
@@ -207,6 +211,40 @@ function addQuestion(type) {
   scrollToQuestion(questions.value.length - 1);
 }
 
+function generateQuestionsByAi() {
+  const topic = aiTopic.value.trim() || form.value.content.trim() || form.value.title.trim();
+  if (!topic) {
+    toast.warning('请填写 AI 出题主题或测试标题/说明');
+    return;
+  }
+  aiGenerating.value = true;
+  request.post('/editor/ai/generateTestQuestions', {
+    teacher_account: account.value,
+    topic,
+    course_name: form.value.title.trim(),
+    choice_count: Number(aiChoiceCount.value) || 0,
+    short_count: Number(aiShortCount.value) || 0,
+  }, { timeout: 90000 }).then(res => {
+    if (res?.available && Array.isArray(res.questions) && res.questions.length) {
+      const generated = res.questions.map(q => ({
+        question_type: q.question_type === 'short' ? 'short' : 'choice',
+        stem: q.stem ?? '',
+        option_a: q.option_a ?? '',
+        option_b: q.option_b ?? '',
+        option_c: q.option_c ?? '',
+        option_d: q.option_d ?? '',
+        correct_option: q.correct_option ?? 'A',
+        score: q.score ?? (q.question_type === 'short' ? 10 : 5),
+      }));
+      questions.value = [...questions.value, ...generated];
+      toast.success(`已生成 ${generated.length} 道题，请核对后发布`);
+    } else {
+      toast.warning(res?.message || 'AI 生成失败');
+    }
+  }).catch(() => toast.error('AI 调用失败'))
+      .finally(() => { aiGenerating.value = false; });
+}
+
 function removeQuestion(index) {
   questions.value.splice(index, 1);
 }
@@ -292,6 +330,28 @@ loadTest();
             <input v-model="form.deadline" type="datetime-local" step="60" class="field-control">
           </label>
         </div>
+      </section>
+
+      <section class="editor-ai card-panel">
+        <h2 class="panel-title">AI 出题</h2>
+        <p class="ai-panel-desc">根据知识点自动生成选择题和简答题草稿，生成后请核对再发布。</p>
+        <div class="ai-generate-grid">
+          <label class="form-field span-2">
+            <span class="field-label">知识点 / 主题</span>
+            <input v-model="aiTopic" type="text" class="field-control" placeholder="例如：Java 面向对象、第三章 多线程">
+          </label>
+          <label class="form-field">
+            <span class="field-label">选择题数量</span>
+            <input v-model.number="aiChoiceCount" type="number" min="0" max="10" class="field-control">
+          </label>
+          <label class="form-field">
+            <span class="field-label">简答题数量</span>
+            <input v-model.number="aiShortCount" type="number" min="0" max="5" class="field-control">
+          </label>
+        </div>
+        <button type="button" class="btn-ai-block" :disabled="aiGenerating" @click="generateQuestionsByAi">
+          {{ aiGenerating ? 'AI 生成中…' : 'AI 生成题目' }}
+        </button>
       </section>
 
       <div v-if="questions.length" class="q-nav-strip">
@@ -695,5 +755,27 @@ loadTest();
   .basic-grid { grid-template-columns: 1fr; }
   .span-2 { grid-column: span 1; }
   .topbar-actions { width: 100%; justify-content: flex-end; }
+  .ai-generate-grid { grid-template-columns: 1fr; }
+  .ai-generate-grid .span-2 { grid-column: span 1; }
 }
+
+.editor-ai { margin-bottom: 16px; }
+.ai-panel-desc { margin: 0 0 14px; font-size: 13px; color: #64748b; }
+.ai-generate-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.ai-generate-grid .span-2 { grid-column: span 2; }
+.btn-ai-block {
+  padding: 10px 18px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-ai-block:disabled { opacity: 0.6; cursor: not-allowed; }
 </style>

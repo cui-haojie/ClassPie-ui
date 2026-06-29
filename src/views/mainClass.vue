@@ -2,7 +2,7 @@
 import {RouterView, useRoute, useRouter} from "vue-router";
 import {storeToRefs} from "pinia";
 import {useAccountStore} from "@/stores/account.js";
-import {computed, onMounted, ref, watch} from "vue";
+import {computed, onMounted, onBeforeUnmount, ref, watch} from "vue";
 import request from "@/utils/request.js";
 import UserAvatar from '@/components/UserAvatar.vue';
 import {formatDateTime} from '@/utils/homeworkDeadline.js';
@@ -12,7 +12,12 @@ const NOTIFY_TYPE_META = {
   homework: { label: '作业', icon: '作' },
   remind: { label: '催交', icon: '催' },
   announcement: { label: '公告', icon: '告' },
+  topic: { label: '话题', icon: '话' },
+  material: { label: '资料', icon: '资' },
   test: { label: '测试', icon: '测' },
+  interaction: { label: '互动', icon: '互' },
+  interaction_pick: { label: '点名', icon: '点' },
+  attendance: { label: '签到', icon: '签' },
 };
 
 function isNotificationUnread(item) {
@@ -21,6 +26,19 @@ function isNotificationUnread(item) {
 
 function notificationTypeMeta(item) {
   return NOTIFY_TYPE_META[item?.type] || { label: '通知', icon: '讯' };
+}
+
+function notificationLinkHint(item) {
+  if (!item) return '';
+  if (item.type === 'interaction' || item.type === 'interaction_pick') return '点击进入互动';
+  if (item.type === 'attendance') return '点击去签到';
+  if (item.type === 'test' && item.homework_id) return '点击进入测试';
+  if ((item.type === 'announcement' || item.type === 'topic' || item.type === 'material') && item.homework_id) {
+    return '点击查看详情';
+  }
+  if (item.homework_id) return '点击查看作业';
+  if (item.class_id) return '点击进入课程';
+  return '';
 }
 
 const accountStore = useAccountStore();
@@ -32,6 +50,7 @@ const showNotifications = ref(false);
 const showUserMenu = ref(false);
 const notifications = ref([]);
 const unreadCount = ref(0);
+let notificationPollTimer = null;
 const subPageTitle = ref('');
 const parentCourseTitle = ref('');
 
@@ -81,6 +100,14 @@ const headerCrumbs = computed(() => {
     items.push({ label: subPageTitle.value || '编辑测试', current: true });
     return items;
   }
+  if (route.name === 'interactionContent') {
+    const items = [];
+    if (parentCourseTitle.value) {
+      items.push({ label: parentCourseTitle.value, action: goCourseFromBreadcrumb });
+    }
+    items.push({ label: subPageTitle.value || '课程互动', current: true });
+    return items;
+  }
   return [];
 });
 
@@ -126,6 +153,9 @@ function goCourseFromBreadcrumb() {
   }
   if (route.name === 'testEditor') {
     query.section = 'test';
+  }
+  if (route.name === 'interactionContent') {
+    query.section = 'interaction';
   }
   router.push({ name: 'courseContent', query });
 }
@@ -190,6 +220,45 @@ function markAllNotificationsRead() {
 
 function openNotification(item) {
   readNotification(item, { silent: true });
+  if (item.homework_id && item.class_id && (item.type === 'interaction' || item.type === 'interaction_pick')) {
+    closePanels();
+    const target = {
+      name: 'interactionContent',
+      params: { id: String(item.homework_id) },
+      query: { classId: String(item.class_id) },
+    };
+    const sameInteraction = route.name === 'interactionContent'
+        && String(route.params.id) === String(item.homework_id)
+        && String(route.query.classId || '') === String(item.class_id);
+    if (sameInteraction) return;
+    router.push(target).catch(() => {
+      router.replace(target);
+    });
+    return;
+  }
+  if (item.type === 'test' && item.homework_id && item.class_id) {
+    closePanels();
+    router.push({
+      name: 'testContent',
+      params: { id: String(item.homework_id) },
+      query: { classId: String(item.class_id) },
+    });
+    return;
+  }
+  if (item.homework_id && item.class_id && (item.type === 'announcement' || item.type === 'topic' || item.type === 'material')) {
+    closePanels();
+    router.push({
+      name: 'activityContent',
+      params: { id: String(item.homework_id) },
+      query: { classId: String(item.class_id), type: item.type },
+    });
+    return;
+  }
+  if (item.type === 'attendance' && item.class_id) {
+    closePanels();
+    router.push({ name: 'liveClass', query: { id: String(item.class_id) } });
+    return;
+  }
   if (item.homework_id && item.class_id) {
     closePanels();
     const target = {
@@ -211,6 +280,12 @@ function openNotification(item) {
     const query = { id: String(item.class_id) };
     if (item.type === 'announcement') {
       query.section = 'announcement';
+    }
+    if (item.type === 'topic') {
+      query.section = 'topic';
+    }
+    if (item.type === 'material') {
+      query.section = 'material';
     }
     if (item.type === 'test') {
       query.section = 'test';
@@ -327,6 +402,30 @@ function loadSubPageTitles() {
             subPageTitle.value = '编辑测试';
           });
     }
+    return;
+  }
+
+  if (route.name === 'interactionContent') {
+    const classId = route.query.classId;
+    const activityId = route.params.id;
+    if (classId) {
+      request.post('/editor/getCourseById', { id: classId })
+          .then(res => {
+            parentCourseTitle.value = res?.class_name || '课程详情';
+          })
+          .catch(() => {
+            parentCourseTitle.value = '课程详情';
+          });
+    }
+    if (activityId) {
+      request.post('/editor/getCourseActivityById', { activity_id: Number(activityId) })
+          .then(res => {
+            subPageTitle.value = res?.title || '课程互动';
+          })
+          .catch(() => {
+            subPageTitle.value = '课程互动';
+          });
+    }
   }
 }
 
@@ -339,6 +438,17 @@ watch(
 onMounted(() => {
   loadNotificationCount();
   loadProfile();
+  notificationPollTimer = setInterval(() => {
+    loadNotificationCount();
+    if (showNotifications.value) {
+      request.post('/editor/notifications', { account: account.value })
+          .then(res => { notifications.value = Array.isArray(res) ? res : []; });
+    }
+  }, 20000);
+});
+
+onBeforeUnmount(() => {
+  if (notificationPollTimer) clearInterval(notificationPollTimer);
 });
 
 function loadProfile() {
@@ -438,9 +548,7 @@ function loadProfile() {
                   <div class="notify-message">{{ item.message }}</div>
                   <div class="notify-time">
                     {{ formatDateTime(item.create_time) }}
-                    <span v-if="item.homework_id" class="notify-link-hint">点击查看作业</span>
-                    <span v-else-if="item.class_id && item.type === 'announcement'" class="notify-link-hint">点击查看公告</span>
-                    <span v-else-if="item.class_id && item.type === 'test'" class="notify-link-hint">点击进入测试</span>
+                    <span v-if="notificationLinkHint(item)" class="notify-link-hint">{{ notificationLinkHint(item) }}</span>
                   </div>
                 </div>
                 <div class="notify-item-actions">
@@ -905,6 +1013,11 @@ function loadProfile() {
   flex-shrink: 0;
 }
 
+.notify-type-interaction { background: #8b5cf6; }
+.notify-type-interaction_pick { background: #ec4899; }
+.notify-type-topic { background: #06b6d4; }
+.notify-type-material { background: #6366f1; }
+.notify-type-attendance { background: #f97316; }
 .notify-type-homework { background: #4285f4; }
 .notify-type-remind { background: #f59e0b; }
 .notify-type-test { background: #ef4444; }

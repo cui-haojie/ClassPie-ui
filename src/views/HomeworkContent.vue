@@ -31,6 +31,8 @@ const homework = ref({
 const contents = ref([]);
 const selectedSubmission = ref(null);
 const gradeScore = ref(0);
+const aiGradeComment = ref('');
+const aiGrading = ref(false);
 const submissionText = ref('');
 const mySubmission = ref(null);
 const attachmentFile = ref(null);
@@ -173,6 +175,7 @@ function showDetails_2() {
 function selectSubmission(item) {
   selectedSubmission.value = item;
   gradeScore.value = item.score ?? 0;
+  aiGradeComment.value = '';
 }
 
 function pickAttachment() {
@@ -252,6 +255,30 @@ function saveGrade() {
     console.error(err);
     toast.error('批阅失败');
   });
+}
+
+function suggestAiGrade() {
+  if (!selectedSubmission.value) {
+    toast.warning('请先选择要批阅的提交');
+    return;
+  }
+  aiGrading.value = true;
+  request.post('/editor/ai/suggestHomeworkGrade', {
+    teacher_account: account.value,
+    homework_name: homework.value.name,
+    homework_description: homework.value.details || '',
+    student_answer: selectedSubmission.value.details || '',
+    max_score: 100,
+  }, { timeout: 90000 }).then(res => {
+    if (res?.available) {
+      gradeScore.value = res.suggested_score ?? 0;
+      aiGradeComment.value = res.comment || '';
+      toast.success('AI 建议已填入');
+    } else {
+      toast.warning(res?.message || 'AI 暂不可用');
+    }
+  }).catch(() => toast.error('AI 调用失败'))
+      .finally(() => { aiGrading.value = false; });
 }
 
 function remindSubmit() {
@@ -429,8 +456,12 @@ function remindSubmit() {
           <div class="grade-row">
             <label>评分（0~100）</label>
             <input v-model.number="gradeScore" type="number" min="0" max="100" class="grade-input"/>
+            <button type="button" class="btn-ai" :disabled="aiGrading" @click="suggestAiGrade">
+              {{ aiGrading ? 'AI 分析中…' : 'AI 建议' }}
+            </button>
             <button class="confirmSay" @click="saveGrade">保存批阅</button>
           </div>
+          <p v-if="aiGradeComment" class="ai-comment">AI 评语：{{ aiGradeComment }}</p>
         </div>
       </div>
     </div>
@@ -696,6 +727,29 @@ function remindSubmit() {
   padding: 0 8px;
   border: 1px solid rgb(218, 220, 224);
   border-radius: 6px;
+}
+
+.btn-ai {
+  padding: 0 14px;
+  height: 36px;
+  border: none;
+  border-radius: 6px;
+  background: #8b5cf6;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-ai:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ai-comment {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #6d28d9;
+  line-height: 1.5;
 }
 
 .attachment-upload {
