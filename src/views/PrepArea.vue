@@ -6,6 +6,10 @@ import { useAccountStore } from '@/stores/account.js';
 import { storeToRefs } from 'pinia';
 import { toast } from '@/utils/toast.js';
 import AppModal from '@/components/AppModal.vue';
+import RichTextEditor from '@/components/RichTextEditor.vue';
+import DateTimePicker from '@/components/DateTimePicker.vue';
+import IconChevron from '@/components/IconChevron.vue';
+import { stripHtml, isEmptyHtml } from '@/utils/htmlText.js';
 import { normalizeDeadlineInput } from '@/utils/homeworkDeadline.js';
 import { appConfirm } from '@/utils/confirm.js';
 
@@ -191,7 +195,7 @@ function removeQuestionImage(q) {
 }
 
 function validTestQuestions() {
-  return testQuestions.value.filter(q => q.stem?.trim() || q.stem_image_url);
+  return testQuestions.value.filter(q => !isEmptyHtml(q.stem) || q.stem_image_url);
 }
 
 function savePrep() {
@@ -267,7 +271,10 @@ onMounted(loadItems);
 <template>
   <div class="prep-area">
     <header class="prep-header">
-      <button type="button" class="btn-ghost" @click="router.push({ name: 'mainInterface' })">← 返回课堂</button>
+      <button type="button" class="btn-ghost btn-with-icon" @click="router.push({ name: 'mainInterface' })">
+        <IconChevron direction="left" />
+        <span>返回课堂</span>
+      </button>
       <h1>备课区</h1>
       <p class="prep-subtitle">提前准备作业、资料、话题、公告和测试，发布到课程时可一键导入</p>
     </header>
@@ -289,7 +296,7 @@ onMounted(loadItems);
       <article v-for="item in items" :key="item.id" class="prep-card">
         <span class="prep-kind-tag">{{ kindLabels[item.kind] || item.kind }}</span>
         <h3>{{ item.title }}</h3>
-        <p v-if="item.content" class="prep-preview">{{ item.content }}</p>
+        <p v-if="item.content" class="prep-preview">{{ stripHtml(item.content) }}</p>
         <p v-if="item.attachment_name" class="prep-attach">📎 {{ item.attachment_name }}</p>
         <div class="prep-card-actions">
           <button type="button" class="btn-ghost" @click="openEdit(item)">编辑</button>
@@ -314,10 +321,14 @@ onMounted(loadItems);
           <span>标题</span>
           <input v-model="form.title" type="text" class="field-control" placeholder="标题">
         </label>
-        <label class="form-field">
+        <div class="form-field">
           <span>内容说明</span>
-          <textarea v-model="form.content" class="field-control field-textarea" placeholder="详细说明、正文或测试说明"></textarea>
-        </label>
+          <RichTextEditor
+              v-model="form.content"
+              placeholder="详细说明、正文或测试说明"
+              min-height="200px"
+          />
+        </div>
 
         <template v-if="form.kind === 'homework'">
           <label class="form-field">
@@ -329,18 +340,18 @@ onMounted(loadItems);
           </label>
           <label class="form-field">
             <span>默认截止时间（发布时可改）</span>
-            <input v-model="form.deadline" type="datetime-local" class="field-control">
+            <DateTimePicker v-model="form.deadline" placeholder="选择截止时间" />
           </label>
         </template>
 
         <template v-if="form.kind === 'test'">
           <label class="form-field">
             <span>默认开始时间</span>
-            <input v-model="form.start_time" type="datetime-local" class="field-control">
+            <DateTimePicker v-model="form.start_time" placeholder="选择开始时间" />
           </label>
           <label class="form-field">
             <span>默认结束时间</span>
-            <input v-model="form.deadline" type="datetime-local" class="field-control">
+            <DateTimePicker v-model="form.deadline" placeholder="选择截止时间" />
           </label>
           <div class="test-questions">
             <div class="test-questions-head">
@@ -355,10 +366,14 @@ onMounted(loadItems);
                 <span class="test-q-label">第 {{ idx + 1 }} 题 · {{ q.question_type === 'short' ? '简答题' : '选择题' }}</span>
                 <button type="button" class="btn-remove-q" @click="removeTestQuestion(idx)">删除</button>
               </div>
-              <label class="form-field">
+              <div class="form-field">
                 <span>题干</span>
-                <textarea v-model="q.stem" class="field-control field-textarea" placeholder="请输入题目文字（可与配图一起使用）"></textarea>
-              </label>
+                <RichTextEditor
+                    v-model="q.stem"
+                    placeholder="请输入题目文字（可与配图一起使用）"
+                    min-height="140px"
+                />
+              </div>
               <div class="stem-image-row">
                 <label class="btn-ghost btn-upload">
                   上传配图

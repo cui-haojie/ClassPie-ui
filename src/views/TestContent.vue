@@ -12,6 +12,9 @@ import {
   testStatusLabel,
   isHomeworkOverdue,
 } from '@/utils/homeworkDeadline.js';
+import RichHtml from '@/components/RichHtml.vue';
+import IconChevron from '@/components/IconChevron.vue';
+import { stripHtml } from '@/utils/htmlText.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -197,7 +200,7 @@ function suggestShortGrade(questionId) {
   aiGrading.value = { ...aiGrading.value, [questionId]: true };
   request.post('/editor/ai/suggestTestShortGrade', {
     teacher_account: account.value,
-    question_stem: q.stem,
+    question_stem: stripHtml(q.stem),
     student_answer: gradingAnswers.value[questionId] || '',
     max_score: q.score ?? 10,
   }, { timeout: 90000 }).then(res => {
@@ -234,9 +237,12 @@ loadDetail();
     <div v-if="loading" class="test-loading">加载中…</div>
     <template v-else-if="activity">
       <header class="test-header">
-        <button type="button" class="btn-back" @click="goBack">← 返回测试列表</button>
+        <button type="button" class="btn-back btn-with-icon" @click="goBack">
+          <IconChevron direction="left" />
+          <span>返回测试列表</span>
+        </button>
         <h1 class="test-title">{{ activity.title }}</h1>
-        <p v-if="activity.content" class="test-desc">{{ activity.content }}</p>
+        <RichHtml v-if="activity.content" :content="activity.content" class="test-desc" tag="p" />
         <div class="test-meta">
           <span v-if="activity.start_time && activity.deadline" class="meta-item">
             测试时间：{{ formatDeadline(activity.start_time) }} 至 {{ formatDeadline(activity.deadline) }}
@@ -313,7 +319,7 @@ loadDetail();
             }">{{ resultLabel(q) }}</span>
             <span class="question-score">{{ q.score ?? 5 }} 分</span>
           </div>
-          <div class="question-stem">{{ q.stem }}</div>
+          <RichHtml :content="q.stem" class="question-stem" tag="div" />
           <img v-if="q.stem_image_url" :src="q.stem_image_url" class="stem-image" alt="题干配图">
 
           <div v-if="q.question_type === 'choice'" class="choice-options">

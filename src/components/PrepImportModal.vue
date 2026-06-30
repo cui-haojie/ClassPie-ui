@@ -5,6 +5,7 @@ import request from '@/utils/request.js';
 import { useAccountStore } from '@/stores/account.js';
 import { storeToRefs } from 'pinia';
 import { toast } from '@/utils/toast.js';
+import { stripHtml } from '@/utils/htmlText.js';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -74,7 +75,7 @@ watch(() => props.modelValue, (open) => {
     <ul v-else class="prep-import-list">
       <li v-for="item in items" :key="item.id" class="prep-import-item" @click="pickItem(item)">
         <strong>{{ item.title }}</strong>
-        <span v-if="item.content" class="prep-import-preview">{{ item.content }}</span>
+        <span v-if="item.content" class="prep-import-preview">{{ stripHtml(item.content) }}</span>
         <span v-if="item.attachment_name" class="prep-import-tag">📎 {{ item.attachment_name }}</span>
       </li>
     </ul>

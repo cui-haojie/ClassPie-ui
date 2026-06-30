@@ -6,6 +6,8 @@ import { useAccountStore } from '@/stores/account.js';
 import { storeToRefs } from 'pinia';
 import { toast } from '@/utils/toast.js';
 import { formatDateTime } from '@/utils/homeworkDeadline.js';
+import RichHtml from '@/components/RichHtml.vue';
+import IconChevron from '@/components/IconChevron.vue';
 
 import { connectLiveSocket } from '@/utils/liveSocket.js';
 
@@ -248,7 +250,10 @@ watch(isActive, (active) => {
   <div class="interaction-page">
     <div v-if="loading" class="loading">加载中…</div>
     <template v-else-if="activity">
-      <button type="button" class="btn-back" @click="goBack">← 返回互动列表</button>
+      <button type="button" class="btn-back btn-with-icon" @click="goBack">
+        <IconChevron direction="left" />
+        <span>返回互动列表</span>
+      </button>
 
       <header class="page-header">
         <div class="header-top">
@@ -311,7 +316,7 @@ watch(isActive, (active) => {
       <template v-if="interactionKind === 'qa'">
       <section class="panel">
         <h2>当前问题</h2>
-        <p v-if="currentQuestion" class="question-text">{{ currentQuestion }}</p>
+        <RichHtml v-if="currentQuestion" :content="currentQuestion" class="question-text" tag="p" />
         <p v-else class="empty-inline">老师尚未提问，请等待…</p>
       </section>
 

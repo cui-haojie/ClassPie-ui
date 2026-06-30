@@ -13,6 +13,11 @@ import PrepImportModal from '@/components/PrepImportModal.vue';
 import ClassTimePicker from '@/components/ClassTimePicker.vue';
 import SchoolClassPicker from '@/components/SchoolClassPicker.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
+import RichTextEditor from '@/components/RichTextEditor.vue';
+import DateTimePicker from '@/components/DateTimePicker.vue';
+import IconChevron from '@/components/IconChevron.vue';
+import RichHtml from '@/components/RichHtml.vue';
+import { stripHtml } from '@/utils/htmlText.js';
 import {formatDateTime, formatDeadline, homeworkStatusLabel, isHomeworkOverdue, normalizeDeadlineInput, testStatusLabel} from '@/utils/homeworkDeadline.js';
 import { parseClassTimeSlots } from '@/utils/courseSchedule.js';
 
@@ -725,10 +730,14 @@ loadAllActivities()
         <span class="field-label">标题</span>
         <input v-model="activityForm.title" type="text" placeholder="请输入标题" class="field-control">
       </label>
-      <label class="form-field">
+      <div class="form-field">
         <span class="field-label">内容</span>
-        <textarea v-model="activityForm.content" class="field-control field-textarea field-textarea-md" placeholder="详细说明、讨论内容或公告正文"></textarea>
-      </label>
+        <RichTextEditor
+            v-model="activityForm.content"
+            placeholder="详细说明、讨论内容或公告正文"
+            min-height="180px"
+        />
+      </div>
       <template v-if="currentActivityType === 'material'">
         <label class="form-field">
           <span class="field-label">上传资料文件</span>
@@ -790,13 +799,17 @@ loadAllActivities()
         <span class="field-label">作业标题</span>
         <input v-model="title_2" type="text" placeholder="请输入作业标题" class="field-control">
       </label>
-      <label class="form-field">
+      <div class="form-field">
         <span class="field-label">作业详情</span>
-        <textarea v-model="bigInput" class="field-control field-textarea field-textarea-lg" placeholder="作业要求、说明等"></textarea>
-      </label>
+        <RichTextEditor
+            v-model="bigInput"
+            placeholder="作业要求、说明等"
+            min-height="220px"
+        />
+      </div>
       <label class="form-field">
         <span class="field-label">截止时间</span>
-        <input v-model="deadline" type="datetime-local" step="60" class="field-control">
+        <DateTimePicker v-model="deadline" placeholder="选择作业截止时间" />
       </label>
       <label class="form-field">
         <span class="field-label">作业附件</span>
@@ -923,7 +936,10 @@ loadAllActivities()
     <div v-if="status !== '老师' && openAttendance" class="attendance-banner" @click="goLiveClass">
       <span class="attendance-banner-dot" />
       <span>老师已发起签到，点击进入输入签到码</span>
-      <span class="attendance-banner-action">去签到 →</span>
+      <span class="attendance-banner-action btn-with-icon">
+        <span>去签到</span>
+        <IconChevron direction="right" :size="12" />
+      </span>
     </div>
 
     <div class="course-body">
@@ -1092,7 +1108,7 @@ loadAllActivities()
                     · 截止 {{ formatDeadline(item.deadline) }}
                   </template>
                 </div>
-                <div v-if="item.content" class="activity-preview">{{ item.content }}</div>
+                <div v-if="item.content" class="activity-preview">{{ stripHtml(item.content) }}</div>
                 <div class="activity-footer">
                   <span class="reply-count">{{ replyCountLabel(item) }}</span>
                   <span v-if="item.attachment_url" class="activity-attachment">📎 {{ item.attachment_name || '附件' }}</span>

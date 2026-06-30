@@ -6,6 +6,7 @@ import { useAccountStore } from '@/stores/account.js';
 import { storeToRefs } from 'pinia';
 import { toast } from '@/utils/toast.js';
 import { connectLiveSocket } from '@/utils/liveSocket.js';
+import IconChevron from '@/components/IconChevron.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -213,7 +214,10 @@ onBeforeUnmount(() => {
 <template>
   <div class="live-class">
     <header class="live-header">
-      <button type="button" class="btn-ghost" @click="router.back()">← 返回课程</button>
+      <button type="button" class="btn-ghost btn-with-icon" @click="router.back()">
+        <IconChevron direction="left" />
+        <span>返回课程</span>
+      </button>
       <h1>上课模式</h1>
       <span class="live-badge">Live</span>
     </header>

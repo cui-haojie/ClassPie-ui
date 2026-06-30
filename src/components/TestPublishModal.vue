@@ -2,6 +2,9 @@
 import { ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import AppModal from '@/components/AppModal.vue';
+import RichTextEditor from '@/components/RichTextEditor.vue';
+import DateTimePicker from '@/components/DateTimePicker.vue';
+import IconChevron from '@/components/IconChevron.vue';
 import request from '@/utils/request.js';
 import { toast } from '@/utils/toast.js';
 import { normalizeDeadlineInput, toDatetimeLocalValue } from '@/utils/homeworkDeadline.js';
@@ -134,22 +137,22 @@ watch(() => props.modelValue, (visible) => {
         <span class="field-label">测试标题</span>
         <input v-model="form.title" type="text" class="field-control" placeholder="例如：第一章单元测验">
       </label>
-      <label class="form-field">
+      <div class="form-field">
         <span class="field-label">测试说明</span>
-        <textarea
+        <RichTextEditor
             v-model="form.content"
-            class="field-control field-textarea field-textarea-md"
             placeholder="选填：测试范围、注意事项等"
-        ></textarea>
-      </label>
+            min-height="180px"
+        />
+      </div>
       <div class="form-row-2">
         <label class="form-field">
           <span class="field-label">开始时间 <em class="optional-hint">发布前必填</em></span>
-          <input v-model="form.start_time" type="datetime-local" step="60" class="field-control">
+          <DateTimePicker v-model="form.start_time" placeholder="选择开始时间" />
         </label>
         <label class="form-field">
           <span class="field-label">结束时间 <em class="optional-hint">发布前必填</em></span>
-          <input v-model="form.deadline" type="datetime-local" step="60" class="field-control">
+          <DateTimePicker v-model="form.deadline" placeholder="选择结束时间" />
         </label>
       </div>
       <p class="form-tip">可先保存草稿，题目与时间稍后在编辑页继续完善</p>
@@ -160,7 +163,10 @@ watch(() => props.modelValue, (visible) => {
       <button type="button" class="btn-ghost" :disabled="saving" @click="saveDraft(false)">
         {{ saving ? '保存中…' : '存草稿' }}
       </button>
-      <button type="button" class="btn-primary" @click="goEditQuestions">编辑题目 →</button>
+      <button type="button" class="btn-primary btn-with-icon" @click="goEditQuestions">
+        <span>编辑题目</span>
+        <IconChevron direction="right" />
+      </button>
     </template>
   </AppModal>
 </template>

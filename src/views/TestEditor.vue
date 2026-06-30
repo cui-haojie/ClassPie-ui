@@ -9,6 +9,10 @@ import {
   normalizeDeadlineInput,
   toDatetimeLocalValue,
 } from '@/utils/homeworkDeadline.js';
+import RichTextEditor from '@/components/RichTextEditor.vue';
+import DateTimePicker from '@/components/DateTimePicker.vue';
+import IconChevron from '@/components/IconChevron.vue';
+import { stripHtml, isEmptyHtml } from '@/utils/htmlText.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -168,7 +172,7 @@ function validatePublish() {
   }
   for (let i = 0; i < questions.value.length; i++) {
     const q = questions.value[i];
-    if (!q.stem?.trim()) {
+    if (isEmptyHtml(q.stem)) {
       toast.warning(`请填写第 ${i + 1} 题题干`);
       scrollToQuestion(i);
       return false;
@@ -212,7 +216,7 @@ function addQuestion(type) {
 }
 
 function generateQuestionsByAi() {
-  const topic = aiTopic.value.trim() || form.value.content.trim() || form.value.title.trim();
+  const topic = aiTopic.value.trim() || stripHtml(form.value.content) || form.value.title.trim();
   if (!topic) {
     toast.warning('请填写 AI 出题主题或测试标题/说明');
     return;
@@ -289,7 +293,10 @@ loadTest();
     <template v-else>
       <header class="editor-topbar">
         <div class="topbar-left">
-          <button type="button" class="btn-text" @click="goBack">← 返回</button>
+          <button type="button" class="btn-text btn-with-icon" @click="goBack">
+            <IconChevron direction="left" />
+            <span>返回</span>
+          </button>
           <div class="topbar-title-wrap">
             <h1 class="topbar-title">{{ form.title || '未命名测试' }}</h1>
             <span class="draft-badge">草稿</span>
@@ -317,17 +324,21 @@ loadTest();
             <span class="field-label">测试标题</span>
             <input v-model="form.title" type="text" class="field-control" placeholder="测试标题">
           </label>
-          <label class="form-field span-2">
+          <div class="form-field span-2">
             <span class="field-label">测试说明</span>
-            <textarea v-model="form.content" class="field-control field-textarea field-textarea-sm" placeholder="选填"></textarea>
-          </label>
+            <RichTextEditor
+                v-model="form.content"
+                placeholder="选填：测试范围、注意事项等"
+                min-height="160px"
+            />
+          </div>
           <label class="form-field">
             <span class="field-label">开始时间</span>
-            <input v-model="form.start_time" type="datetime-local" step="60" class="field-control">
+            <DateTimePicker v-model="form.start_time" placeholder="选择开始时间" />
           </label>
           <label class="form-field">
             <span class="field-label">结束时间</span>
-            <input v-model="form.deadline" type="datetime-local" step="60" class="field-control">
+            <DateTimePicker v-model="form.deadline" placeholder="选择结束时间" />
           </label>
         </div>
       </section>
@@ -360,7 +371,7 @@ loadTest();
             :key="'nav-' + i"
             type="button"
             class="q-nav-pill"
-            :class="[q.question_type, { filled: q.stem?.trim() }]"
+            :class="[q.question_type, { filled: !isEmptyHtml(q.stem) }]"
             @click="scrollToQuestion(i)"
         >
           {{ i + 1 }}
@@ -382,20 +393,24 @@ loadTest();
               <span class="q-score-tag">{{ q.score ?? 5 }} 分</span>
             </div>
             <div class="q-block-ops">
-              <button type="button" class="op-btn" :disabled="i === 0" @click="moveQuestion(i, -1)">↑</button>
-              <button type="button" class="op-btn" :disabled="i === questions.length - 1" @click="moveQuestion(i, 1)">↓</button>
+              <button type="button" class="op-btn op-btn-icon" :disabled="i === 0" title="上移" @click="moveQuestion(i, -1)">
+                <IconChevron direction="up" :size="12" />
+              </button>
+              <button type="button" class="op-btn op-btn-icon" :disabled="i === questions.length - 1" title="下移" @click="moveQuestion(i, 1)">
+                <IconChevron direction="down" :size="12" />
+              </button>
               <button type="button" class="op-btn danger" @click="removeQuestion(i)">删除</button>
             </div>
           </div>
 
-          <label class="form-field">
+          <div class="form-field">
             <span class="field-label">题干</span>
-            <textarea
+            <RichTextEditor
                 v-model="q.stem"
-                class="field-control field-textarea field-textarea-md"
                 placeholder="请输入题目内容"
-            ></textarea>
-          </label>
+                min-height="140px"
+            />
+          </div>
 
           <template v-if="q.question_type === 'choice'">
             <div class="choice-editor">
@@ -647,6 +662,13 @@ loadTest();
 }
 
 .op-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.op-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  padding: 0 8px;
+}
 .op-btn.danger { color: #ef4444; border-color: #fecaca; }
 .op-btn.danger:hover { background: #fef2f2; }
 

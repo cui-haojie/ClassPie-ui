@@ -8,6 +8,7 @@ import {toast} from '@/utils/toast.js';
 import {resolveAttachmentUrl} from '@/utils/avatar.js';
 import {formatDeadline, homeworkStatusLabel, isHomeworkOverdue} from '@/utils/homeworkDeadline.js';
 import UserAvatar from '@/components/UserAvatar.vue';
+import RichHtml from '@/components/RichHtml.vue';
 
 const route = useRoute();
 const accountStore = useAccountStore();
@@ -331,7 +332,7 @@ function remindSubmit() {
           <div class="score">100分</div>
           <div class="type" :class="{ overdue: isOverdue }">{{ statusLabel }}</div>
         </div>
-        <div v-if="homework.details" class="homework-desc">{{ homework.details }}</div>
+        <RichHtml v-if="homework.details" :content="homework.details" class="homework-desc" />
         <div v-else class="homework-desc muted">暂无作业说明</div>
         <div v-if="homework.attachment_url" class="attachment-row teacher-attachment">
           <span>教师附件：</span>
@@ -353,7 +354,7 @@ function remindSubmit() {
             <div class="score">100分</div>
             <div class="type" :class="{ overdue: isOverdue }">{{ statusLabel }}</div>
           </div>
-          <div v-if="homework.details" class="homework-desc">{{ homework.details }}</div>
+          <RichHtml v-if="homework.details" :content="homework.details" class="homework-desc" />
           <div v-else class="homework-desc muted">暂无作业说明</div>
           <div v-if="homework.attachment_url" class="attachment-row teacher-attachment">
             <span>教师附件：</span>
@@ -416,7 +417,7 @@ function remindSubmit() {
             <div class="score">100分</div>
             <div class="type" :class="{ overdue: isOverdue }">{{ statusLabel }}</div>
           </div>
-          <div v-if="homework.details" class="homework-desc">{{ homework.details }}</div>
+          <RichHtml v-if="homework.details" :content="homework.details" class="homework-desc" />
         </div>
       </div>
       <div class="grade-panel">

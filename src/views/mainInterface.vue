@@ -10,6 +10,7 @@ import {INSTITUTION_OPTIONS, resolveMechanism} from '@/constants/institutions.js
 import {SEMESTER_OPTIONS, formatSemester, getDefaultSemester} from '@/constants/semesters.js';
 import AppModal from '@/components/AppModal.vue';
 import ClassTimePicker from '@/components/ClassTimePicker.vue';
+import { parseClassTimeSlots } from '@/utils/courseSchedule.js';
 import {appConfirm} from '@/utils/confirm.js';
 
 const router = useRouter();
@@ -34,6 +35,8 @@ const searchKeyword = ref('')
 const courseListVisible = ref(true)
 const showArchiveModal = ref(false)
 const archivedCourses = ref([])
+const archiveLoading = ref(false)
+const archiveKeyword = ref('')
 const schoolClasses = ref([])
 const selectedSchoolClassIds = ref([])
 const newClassName = ref('')
@@ -156,6 +159,27 @@ const canDragSort = computed(() =>
     activeTab.value === 'all' &&
     !searchKeyword.value
 )
+
+const filteredArchivedCourses = computed(() => {
+  const keyword = archiveKeyword.value.trim().toLowerCase()
+  if (!keyword) return archivedCourses.value
+  return archivedCourses.value.filter(course => {
+    const teacherName = course.teacherName || ''
+    return (
+        (course.class_name || '').toLowerCase().includes(keyword) ||
+        (course.selected_classes || '').toLowerCase().includes(keyword) ||
+        (course.code || '').toLowerCase().includes(keyword) ||
+        teacherName.toLowerCase().includes(keyword) ||
+        formatSemester(course.semester).toLowerCase().includes(keyword)
+    )
+  })
+})
+
+const archiveStats = computed(() => {
+  const list = archivedCourses.value
+  const teachCount = list.filter(c => isTeachingCourse(c)).length
+  return { total: list.length, teach: teachCount, learn: list.length - teachCount }
+})
 
 const isCourseSorting = computed(() => draggingCourseId.value != null)
 
@@ -728,15 +752,48 @@ function archiveCourse(courseId) {
 
 function openArchiveModal() {
   showArchiveModal.value = true
+  archiveKeyword.value = ''
+  archiveLoading.value = true
   request.post('/editor/archivedCourses', { account: account.value })
       .then(async res => {
         const list = res || []
-        const teacherRequests = list.map(course =>
-            request.post('/editor/selectTeacherName', { account: course.teacher_account })
-                .then(teacherRes => ({ ...course, teacherName: teacherRes || '未知教师' }))
-        )
-        archivedCourses.value = await Promise.all(teacherRequests)
+        const enriched = await Promise.all(list.map(async (course) => {
+          const [teacherRes, countRes] = await Promise.all([
+            request.post('/editor/selectTeacherName', { account: course.teacher_account }),
+            request.post('/editor/getCountById', { id: course.id }),
+          ])
+          return {
+            ...course,
+            teacherName: teacherRes || '未知教师',
+            memberCount: typeof countRes === 'number' ? countRes : 0,
+          }
+        }))
+        archivedCourses.value = enriched
       })
+      .catch(() => toast.error('加载归档课程失败'))
+      .finally(() => { archiveLoading.value = false })
+}
+
+function deleteArchivedCourse(course) {
+  const action = isTeachingCourse(course) ? '退出该课程' : '退课'
+  appConfirm(`确定${action}？归档记录也将清除。`, { title: action, danger: true }).then(ok => {
+    if (!ok) return
+    request.post('/editor/deleteCourse', { id: course.id, account: account.value })
+        .then(response => {
+          if (response) {
+            toast.success(`${action}成功`)
+            openArchiveModal()
+            loadCourse()
+          }
+        }).catch(error => {
+      toast.error('操作失败：' + error.message)
+    })
+  })
+}
+
+function formatArchiveSchedule(course) {
+  const slots = parseClassTimeSlots(course?.class_time)
+  return slots.length ? slots.join('、') : '未设置上课时间'
 }
 
 function restoreCourse(courseId) {
@@ -906,13 +963,90 @@ function restoreCourse(courseId) {
     </template>
   </AppModal>
 
-  <AppModal v-model="showArchiveModal" title="归档管理" subtitle="已归档课程可恢复或退课" size="md">
-    <div v-if="archivedCourses.length === 0" class="archive-empty">暂无归档课程</div>
-    <div v-for="course in archivedCourses" :key="course.id" class="archive-item">
-      <span>{{ course.class_name }}（{{ course.teacherName }}）</span>
-      <div class="archive-actions">
-        <button type="button" class="btn-outline" @click="restoreCourse(course.id)">恢复</button>
-        <button type="button" class="btn-ghost" @click="deleteCourse(course.id)">退课</button>
+  <AppModal
+      v-model="showArchiveModal"
+      title="归档管理"
+      subtitle="已归档课程不会出现在首页列表，教师可恢复，学生可退课"
+      size="lg"
+  >
+    <div class="archive-panel">
+      <div v-if="archivedCourses.length" class="archive-summary">
+        <span class="archive-stat">共 {{ archiveStats.total }} 门</span>
+        <span v-if="status === '老师'" class="archive-stat">我教的 {{ archiveStats.teach }} 门</span>
+        <span class="archive-stat">我学的 {{ archiveStats.learn }} 门</span>
+      </div>
+
+      <label v-if="archivedCourses.length" class="form-field archive-search">
+        <span class="field-label">搜索归档课程</span>
+        <input
+            v-model="archiveKeyword"
+            type="search"
+            class="field-control"
+            placeholder="课程名、班级、加课码、教师…"
+        >
+      </label>
+
+      <div v-if="archiveLoading" class="archive-empty">加载中…</div>
+      <div v-else-if="!archivedCourses.length" class="archive-empty">
+        <p class="archive-empty-title">暂无归档课程</p>
+        <p class="archive-empty-desc">在课程卡片底部点击「归档」后，课程会出现在这里</p>
+      </div>
+      <div v-else-if="!filteredArchivedCourses.length" class="archive-empty">没有匹配的归档课程</div>
+      <div v-else class="archive-list">
+        <article
+            v-for="course in filteredArchivedCourses"
+            :key="course.id"
+            class="archive-card"
+            :class="'theme-' + getCourseThemeIndex(course)"
+        >
+          <div class="archive-card-head">
+            <div class="archive-card-title-row">
+              <h3 class="archive-card-title">{{ course.class_name }}</h3>
+              <span class="role-tag" :class="{ 'teach-tag': isTeachingCourse(course) }">
+                {{ isTeachingCourse(course) ? '教' : '学' }}
+              </span>
+            </div>
+            <p class="archive-card-sub">{{ course.selected_classes || '暂无教学班级展示名' }}</p>
+          </div>
+
+          <dl class="archive-meta-grid">
+            <div class="archive-meta-item">
+              <dt>学年学期</dt>
+              <dd>{{ formatSemester(course.semester) || '未设置' }}</dd>
+            </div>
+            <div class="archive-meta-item">
+              <dt>加课码</dt>
+              <dd><code>{{ course.code || '—' }}</code></dd>
+            </div>
+            <div class="archive-meta-item">
+              <dt>课程负责人</dt>
+              <dd>{{ course.teacherName }}</dd>
+            </div>
+            <div class="archive-meta-item">
+              <dt>成员人数</dt>
+              <dd>{{ course.memberCount ?? 0 }} 人</dd>
+            </div>
+            <div class="archive-meta-item span-2">
+              <dt>上课时间</dt>
+              <dd>{{ formatArchiveSchedule(course) }}</dd>
+            </div>
+          </dl>
+
+          <div class="archive-card-actions">
+            <button
+                v-if="isTeachingCourse(course)"
+                type="button"
+                class="btn-primary"
+                @click="restoreCourse(course.id)"
+            >
+              恢复课程
+            </button>
+            <button type="button" class="btn-outline" @click="handleClick(course.id)">进入查看</button>
+            <button type="button" class="btn-ghost danger-text" @click="deleteArchivedCourse(course)">
+              {{ isTeachingCourse(course) ? '退出课程' : '退课' }}
+            </button>
+          </div>
+        </article>
       </div>
     </div>
     <template #footer>
@@ -2140,55 +2274,149 @@ p {
   color: #4285f4;
 }
 
-.archive-modal {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.35);
-  z-index: 1000;
+.archive-panel {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.archive-box {
-  background: #fff;
-  border-radius: 8px;
-  padding: 24px;
-  width: 520px;
-  max-height: 70vh;
-  overflow-y: auto;
-}
-
-.archive-item {
+.archive-summary {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 0;
-  border-bottom: 1px solid #eee;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
-.archive-item button {
-  margin-left: auto;
+.archive-stat {
+  display: inline-flex;
+  align-items: center;
   padding: 6px 12px;
-  border: 1px solid #ddd;
-  background: #fff;
-  border-radius: 4px;
-  cursor: pointer;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.archive-search {
+  margin: 0;
+}
+
+.archive-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 52vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.archive-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 16px 18px;
+  background: linear-gradient(135deg, #fff 0%, #f8fafc 100%);
+  border-left: 4px solid #488af8;
+}
+
+.archive-card.theme-0 { border-left-color: #488af8; }
+.archive-card.theme-1 { border-left-color: #6366f1; }
+.archive-card.theme-2 { border-left-color: #0ea5e9; }
+.archive-card.theme-3 { border-left-color: #14b8a6; }
+.archive-card.theme-4 { border-left-color: #22c55e; }
+.archive-card.theme-5 { border-left-color: #eab308; }
+.archive-card.theme-6 { border-left-color: #f97316; }
+.archive-card.theme-7 { border-left-color: #ec4899; }
+
+.archive-card-head {
+  margin-bottom: 14px;
+}
+
+.archive-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.archive-card-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.archive-card-sub {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.archive-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 16px;
+  margin: 0 0 16px;
+}
+
+.archive-meta-item {
+  min-width: 0;
+}
+
+.archive-meta-item.span-2 {
+  grid-column: 1 / -1;
+}
+
+.archive-meta-item dt {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.archive-meta-item dd {
+  margin: 0;
+  font-size: 14px;
+  color: #334155;
+  word-break: break-word;
+}
+
+.archive-meta-item code {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  color: #1e293b;
+}
+
+.archive-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.danger-text {
+  color: #ef4444 !important;
 }
 
 .archive-empty {
-  color: #999;
-  padding: 24px 0;
+  text-align: center;
+  padding: 36px 16px;
+  color: #64748b;
 }
 
-.archive-close {
-  margin-top: 16px;
-  padding: 8px 16px;
-  border: none;
-  background: rgb(66,133,244);
-  color: #fff;
-  border-radius: 4px;
-  cursor: pointer;
+.archive-empty-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.archive-empty-desc {
+  margin: 0;
+  font-size: 13px;
+  color: #94a3b8;
 }
 
 </style>

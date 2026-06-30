@@ -1,6 +1,7 @@
 <script setup>
 import { ref, watch } from 'vue';
 import AppModal from '@/components/AppModal.vue';
+import RichTextEditor from '@/components/RichTextEditor.vue';
 import request from '@/utils/request.js';
 import { toast } from '@/utils/toast.js';
 
@@ -98,10 +99,14 @@ watch(() => props.modelValue, (v) => { if (v) reset(); });
         <span class="field-label">互动标题</span>
         <input v-model="form.title" type="text" class="field-control" placeholder="例如：第三章课堂问答">
       </label>
-      <label v-if="form.interaction_kind === 'qa'" class="form-field">
+      <div v-if="form.interaction_kind === 'qa'" class="form-field">
         <span class="field-label">首个问题（选填）</span>
-        <textarea v-model="form.content" class="field-control field-textarea field-textarea-md" placeholder="可先留空，进入互动页后再提问…"></textarea>
-      </label>
+        <RichTextEditor
+            v-model="form.content"
+            placeholder="可先留空，进入互动页后再提问…"
+            min-height="160px"
+        />
+      </div>
       <label v-if="form.interaction_kind === 'vote'" class="form-field">
         <span class="field-label">投票选项（每行一个）</span>
         <textarea v-model="form.vote_options" class="field-control field-textarea field-textarea-md"></textarea>

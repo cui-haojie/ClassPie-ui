@@ -6,6 +6,8 @@ import { useAccountStore } from '@/stores/account.js';
 import { storeToRefs } from 'pinia';
 import { toast } from '@/utils/toast.js';
 import UserAvatar from '@/components/UserAvatar.vue';
+import RichHtml from '@/components/RichHtml.vue';
+import IconChevron from '@/components/IconChevron.vue';
 import {
   formatDateTime,
   formatDeadline,
@@ -216,7 +218,10 @@ reloadAll();
 
 <template>
   <div class="activity-page">
-    <button type="button" class="back-btn" @click="goBack">← 返回课程</button>
+    <button type="button" class="back-btn btn-with-icon" @click="goBack">
+      <IconChevron direction="left" />
+      <span>返回课程</span>
+    </button>
 
     <div v-if="loading && !activity" class="loading-panel">加载中…</div>
 
@@ -248,7 +253,8 @@ reloadAll();
         </div>
       </div>
 
-      <div class="activity-body">{{ activity.content || '暂无详细说明' }}</div>
+      <RichHtml :content="activity.content || ''" class="activity-body" tag="div" />
+      <p v-if="!activity.content" class="activity-body muted">暂无详细说明</p>
 
       <a
           v-if="activity.attachment_url"
@@ -467,7 +473,11 @@ reloadAll();
   margin-top: 16px;
   line-height: 1.75;
   color: #334155;
-  white-space: pre-wrap;
+}
+
+.activity-body.muted {
+  color: #94a3b8;
+  font-size: 15px;
 }
 
 .attachment-link {
