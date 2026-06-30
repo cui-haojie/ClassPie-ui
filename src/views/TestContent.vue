@@ -37,7 +37,18 @@ const activity = computed(() => detail.value?.activity ?? null);
 const answerResults = computed(() => detail.value?.answer_results ?? {});
 const totalScore = computed(() => detail.value?.total_score ?? 0);
 const maxScore = computed(() => detail.value?.max_score ?? 0);
-const isFullyGraded = computed(() => !!detail.value?.is_fully_graded);
+const isFullyGraded = computed(() => {
+  if (shortCount.value === 0 && submitted.value) return true;
+  const flag = detail.value?.is_fully_graded;
+  return flag === true || flag === 1;
+});
+
+const needsShortGrading = computed(() => shortCount.value > 0 && !isFullyGraded.value);
+
+function submissionGradeLabel(item) {
+  if (shortCount.value === 0) return '已批完';
+  return item?.is_fully_graded ? '已批完' : '待批简答';
+}
 const submissions = computed(() => detail.value?.submissions ?? []);
 const questions = computed(() => detail.value?.questions ?? []);
 const choiceCount = computed(() => detail.value?.choice_count ?? 0);
@@ -260,7 +271,7 @@ loadDetail();
           <span v-if="submitted" class="summary-chip submitted">已提交</span>
           <span v-if="submitted && !isTeacher" class="summary-chip score">
             得分 {{ totalScore }} / {{ maxScore }}
-            <template v-if="!isFullyGraded">（简答题待批阅）</template>
+            <template v-if="needsShortGrading">（简答题待批阅）</template>
           </span>
         </div>
       </header>
@@ -277,7 +288,7 @@ loadDetail();
           >
             <span class="name">{{ item.account_name || item.account }}</span>
             <span class="score">{{ item.total_score ?? 0 }} / {{ item.max_score ?? maxScore }}</span>
-            <span class="badge" :class="{ done: item.is_fully_graded }">{{ item.is_fully_graded ? '已批完' : '待批简答' }}</span>
+            <span class="badge" :class="{ done: shortCount === 0 || item.is_fully_graded }">{{ submissionGradeLabel(item) }}</span>
           </div>
         </div>
         <div v-if="gradingStudent" class="grade-short-box">

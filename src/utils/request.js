@@ -14,7 +14,7 @@ request.interceptors.request.use(config => {
     }
     const accountStore = useAccountStore()
     const currentName = router.currentRoute.value.name
-    const isPublicPage = ['login', 'register', 'forget', 'main'].includes(currentName)
+    const isPublicPage = ['homePage', 'login', 'register', 'forget'].includes(currentName)
     if (accountStore.token && !isPublicPage) {
         config.headers.Authorization = `Bearer ${accountStore.token}`
     }
@@ -38,7 +38,7 @@ request.interceptors.response.use(
         if (status === 401) {
             const accountStore = useAccountStore()
             const currentName = router.currentRoute.value.name
-            const isPublicPage = ['login', 'register', 'forget', 'main'].includes(currentName)
+            const isPublicPage = ['homePage', 'login', 'register', 'forget'].includes(currentName)
             accountStore.logout()
             if (!isPublicPage) {
                 toast.error('登录已过期，请重新登录')

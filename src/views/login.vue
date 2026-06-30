@@ -209,9 +209,9 @@ function wechatM() {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 48px;
+  gap: 56px;
   min-height: 100vh;
-  padding: 40px 24px;
+  padding: 40px 32px 40px 24px;
   background-color: rgb(248, 249, 250);
 }
 

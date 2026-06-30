@@ -22,12 +22,20 @@ const router = useRouter();
 const saving = ref(false);
 const form = ref({ title: '', content: '', start_time: '', deadline: '' });
 const activityId = ref(null);
+const titleError = ref('');
 
 function resetForm() {
   saving.value = false;
+  titleError.value = '';
   activityId.value = props.draftId ? Number(props.draftId) : null;
   form.value = { title: '', content: '', start_time: '', deadline: '' };
 }
+
+watch(() => form.value.title, () => {
+  if (titleError.value && form.value.title.trim()) {
+    titleError.value = '';
+  }
+});
 
 function loadDraft(id) {
   request.post('/editor/getTestDetail', {
@@ -59,7 +67,9 @@ function buildPayload() {
 }
 
 function validateTitle() {
+  titleError.value = '';
   if (!form.value.title.trim()) {
+    titleError.value = '请填写测试标题';
     toast.warning('请填写测试标题');
     return false;
   }
@@ -134,8 +144,15 @@ watch(() => props.modelValue, (visible) => {
   >
     <div class="wizard-body step-basic">
       <label class="form-field">
-        <span class="field-label">测试标题</span>
-        <input v-model="form.title" type="text" class="field-control" placeholder="例如：第一章单元测验">
+        <span class="field-label">测试标题 <em>*</em></span>
+        <input
+            v-model="form.title"
+            type="text"
+            class="field-control"
+            :class="{ 'input-invalid': titleError }"
+            placeholder="例如：第一章单元测验"
+        >
+        <p v-if="titleError" class="field-error">{{ titleError }}</p>
       </label>
       <div class="form-field">
         <span class="field-label">测试说明</span>
@@ -198,6 +215,12 @@ watch(() => props.modelValue, (visible) => {
   padding: 10px 12px;
   background: #f8fafc;
   border-radius: 8px;
+}
+
+.field-error {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #ef4444;
 }
 
 @media (max-width: 520px) {

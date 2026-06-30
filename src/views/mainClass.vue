@@ -2,7 +2,7 @@
 import {RouterView, useRoute, useRouter} from "vue-router";
 import {storeToRefs} from "pinia";
 import {useAccountStore} from "@/stores/account.js";
-import {computed, onMounted, onBeforeUnmount, ref, watch} from "vue";
+import {computed, onMounted, onBeforeUnmount, ref, watch, nextTick} from "vue";
 import request from "@/utils/request.js";
 import UserAvatar from '@/components/UserAvatar.vue';
 import {formatDateTime} from '@/utils/homeworkDeadline.js';
@@ -48,6 +48,7 @@ const route = useRoute();
 
 const showNotifications = ref(false);
 const showUserMenu = ref(false);
+const notifyMenuRef = ref(null);
 const notifications = ref([]);
 const unreadCount = ref(0);
 let notificationPollTimer = null;
@@ -184,6 +185,28 @@ function toggleNotifications() {
         });
   }
 }
+
+function closeNotifications() {
+  showNotifications.value = false;
+}
+
+function handleNotifyOutside(event) {
+  if (!showNotifications.value) return;
+  const root = notifyMenuRef.value;
+  if (root && !root.contains(event.target)) {
+    closeNotifications();
+  }
+}
+
+watch(showNotifications, (open) => {
+  if (open) {
+    nextTick(() => {
+      document.addEventListener('mousedown', handleNotifyOutside);
+    });
+  } else {
+    document.removeEventListener('mousedown', handleNotifyOutside);
+  }
+});
 
 function readNotification(item, options = {}) {
   const { silent = false } = options;
@@ -449,6 +472,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (notificationPollTimer) clearInterval(notificationPollTimer);
+  document.removeEventListener('mousedown', handleNotifyOutside);
 });
 
 function loadProfile() {
@@ -477,7 +501,7 @@ function loadProfile() {
             <button
                 type="button"
                 class="nav-crumb"
-                :class="{ active: isHomeActive }"
+                :class="{ active: isHomeActive, link: !isHomeActive }"
                 @click="goHome"
             >
               我的课堂
@@ -500,7 +524,7 @@ function loadProfile() {
         </div>
 
         <div class="header-right">
-          <div class="notify-menu" :class="{ open: showNotifications }">
+          <div ref="notifyMenuRef" class="notify-menu" :class="{ open: showNotifications }">
             <button
                 type="button"
                 class="header-icon-btn"
@@ -631,10 +655,11 @@ function loadProfile() {
 }
 
 .header-inner {
-  max-width: 1280px;
+  width: 100%;
+  max-width: none;
   height: 100%;
-  margin: 0 auto;
-  padding: 0 24px;
+  margin: 0;
+  padding: 0 36px 0 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -660,7 +685,7 @@ function loadProfile() {
 }
 
 .logo {
-  height: 38px;
+  height: 42px;
   width: auto;
   display: block;
 }
@@ -688,14 +713,14 @@ function loadProfile() {
 .nav-crumb {
   border: none;
   background: none;
-  padding: 8px 12px;
-  border-radius: 8px;
+  padding: 6px 0;
+  border-radius: 0;
   font-size: 18px;
   font-weight: 500;
   color: #64748b;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.15s, color 0.15s;
+  transition: color 0.15s;
 }
 
 .nav-crumb.link {
@@ -703,12 +728,13 @@ function loadProfile() {
 }
 
 .nav-crumb.link:hover {
-  background: #eff6ff;
+  color: #2563eb;
 }
 
 .nav-crumb.active {
   color: #1e293b;
-  background: #f1f5f9;
+  font-weight: 600;
+  cursor: default;
 }
 
 .nav-crumb.current {
@@ -719,6 +745,7 @@ function loadProfile() {
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: default;
+  padding: 6px 0;
 }
 
 .header-right {
@@ -726,6 +753,8 @@ function loadProfile() {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  margin-left: auto;
+  padding-right: 4px;
 }
 
 .notify-menu {

@@ -23,7 +23,7 @@ import { toastState } from '@/utils/toast.js'
   position: fixed;
   top: 24px;
   right: 24px;
-  z-index: 9999;
+  z-index: 13000;
   display: flex;
   flex-direction: column;
   gap: 12px;

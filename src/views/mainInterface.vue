@@ -5,9 +5,9 @@ import {useCourseUiStore} from "@/stores/courseUi.js";
 import {storeToRefs} from "pinia";
 import request from "@/utils/request.js";
 import {toast} from '@/utils/toast.js';
-import {ref, reactive, watch, computed, TransitionGroup} from "vue";
+import {ref, reactive, watch, computed, TransitionGroup, onBeforeUnmount, nextTick} from "vue";
 import {INSTITUTION_OPTIONS, resolveMechanism} from '@/constants/institutions.js';
-import {SEMESTER_OPTIONS, formatSemester, getDefaultSemester} from '@/constants/semesters.js';
+import {SEMESTER_OPTIONS, formatSemester, getDefaultSemester, getSemesterRank} from '@/constants/semesters.js';
 import AppModal from '@/components/AppModal.vue';
 import ClassTimePicker from '@/components/ClassTimePicker.vue';
 import { parseClassTimeSlots } from '@/utils/courseSchedule.js';
@@ -27,12 +27,12 @@ const email_or_phone = ref('')
 const status_number = ref('')
 const join_Class = ref(null);
 const joinOrCreate = ref(null);
-const container = ref(null);
 const courses = ref([]);
 const learn = ref(null)
 const teach = ref(null)
 const searchKeyword = ref('')
-const courseListVisible = ref(true)
+const expandedSemesters = ref(new Set())
+let lastSemesterGroupKeys = ''
 const showArchiveModal = ref(false)
 const archivedCourses = ref([])
 const archiveLoading = ref(false)
@@ -59,16 +59,12 @@ const orderDirty = ref(false)
 const showJoinModal = ref(false)
 const showCreateModal = ref(false)
 const showChoiceMenu = ref(false)
+const choiceMenuRef = ref(null)
 const joinCode = ref('')
 
 const activeTab = computed({
   get: () => courseUiStore.activeTab,
   set: (val) => { courseUiStore.activeTab = val },
-})
-
-const selectedSemester = computed({
-  get: () => courseUiStore.selectedSemester,
-  set: (val) => { courseUiStore.selectedSemester = val },
 })
 
 const createForm = reactive({
@@ -81,43 +77,6 @@ const createForm = reactive({
 const pinnedCourses = computed(() =>
     courses.value.filter(course => course.is_pinned)
 );
-
-const availableSemesters = computed(() => {
-  const values = new Set()
-  courses.value.forEach(course => {
-    if (course.semester) values.add(course.semester)
-  })
-  return Array.from(values).sort().reverse()
-})
-
-const semesterFilterOptions = computed(() => {
-  const options = [{ label: '全部学期', value: 'all' }]
-  const seen = new Set(['all'])
-  semesterOptions.forEach(item => {
-    options.push({ label: item.label, value: item.value })
-    seen.add(item.value)
-  })
-  availableSemesters.value.forEach(value => {
-    if (!seen.has(value)) {
-      options.push({ label: value, value })
-      seen.add(value)
-    }
-  })
-  return options
-})
-
-const semesterScopedCourses = computed(() => {
-  if (selectedSemester.value === 'all') {
-    return courses.value
-  }
-  return courses.value.filter(course =>
-      !course.semester || course.semester === selectedSemester.value
-  )
-})
-
-const unpinnedCourses = computed(() =>
-    semesterScopedCourses.value.filter(course => !course.is_pinned)
-)
 
 function getCourseThemeIndex(course) {
   const id = Number(course?.id) || 0;
@@ -134,7 +93,7 @@ function isTeachingCourse(course) {
 }
 
 const filteredCourses = computed(() => {
-  let list = unpinnedCourses.value
+  let list = courses.value
   if (status.value) {
     if (activeTab.value === 'learn') {
       list = list.filter(course => !isTeachingCourse(course))
@@ -154,10 +113,31 @@ const filteredCourses = computed(() => {
   });
 });
 
+const semesterGroups = computed(() => {
+  const map = new Map()
+  filteredCourses.value.forEach(course => {
+    const key = course.semester || '__unset__'
+    if (!map.has(key)) map.set(key, [])
+    map.get(key).push(course)
+  })
+  return Array.from(map.entries())
+      .sort((a, b) => getSemesterRank(b[0] === '__unset__' ? '' : b[0]) - getSemesterRank(a[0] === '__unset__' ? '' : a[0]))
+      .map(([key, list]) => ({
+        key,
+        label: key === '__unset__' ? '未设置学期' : formatSemester(key),
+        courses: list,
+      }))
+})
+
 const canDragSort = computed(() =>
-    selectedSemester.value === 'all' &&
     activeTab.value === 'all' &&
     !searchKeyword.value
+)
+
+const canDragPinnedSort = computed(() =>
+    activeTab.value === 'all' &&
+    !searchKeyword.value &&
+    pinnedCourses.value.length > 1
 )
 
 const filteredArchivedCourses = computed(() => {
@@ -189,16 +169,35 @@ watch(() => status.value, (val) => {
   }
 });
 
-watch(courses, (list) => {
-  if (!list.length || selectedSemester.value === 'all') return
-  const matched = list.filter(course =>
-      !course.semester || course.semester === selectedSemester.value
-  )
-  if (!matched.length) {
-    selectedSemester.value = 'all'
-    toast.info('当前学期无课程，已切换为「全部学期」')
+watch(
+    () => semesterGroups.value.map(group => group.key).join('|'),
+    (keysStr) => {
+      if (keysStr === lastSemesterGroupKeys) return
+      lastSemesterGroupKeys = keysStr
+      const firstKey = semesterGroups.value[0]?.key
+      expandedSemesters.value = firstKey ? new Set([firstKey]) : new Set()
+    },
+    { immediate: true },
+)
+
+function isSemesterExpanded(key) {
+  return expandedSemesters.value.has(key)
+}
+
+function toggleSemesterSection(key) {
+  const next = new Set(expandedSemesters.value)
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
   }
-})
+  expandedSemesters.value = next
+}
+
+function getCourseSemesterKey(courseId) {
+  const course = courses.value.find(item => item.id === courseId)
+  return course?.semester || '__unset__'
+}
 
 function update() {
   if (!account.value) return Promise.resolve();
@@ -284,6 +283,32 @@ console.log(courses.value[0])
 function Choice() {
   showChoiceMenu.value = !showChoiceMenu.value;
 }
+
+function closeChoiceMenu() {
+  showChoiceMenu.value = false;
+}
+
+function handleChoiceMenuOutside(event) {
+  if (!showChoiceMenu.value) return;
+  const root = choiceMenuRef.value;
+  if (root && !root.contains(event.target)) {
+    closeChoiceMenu();
+  }
+}
+
+watch(showChoiceMenu, (open) => {
+  if (open) {
+    nextTick(() => {
+      document.addEventListener('mousedown', handleChoiceMenuOutside);
+    });
+  } else {
+    document.removeEventListener('mousedown', handleChoiceMenuOutside);
+  }
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener('mousedown', handleChoiceMenuOutside);
+});
 
 function closeJoinModal() {
   showJoinModal.value = false;
@@ -631,6 +656,7 @@ function onDragOverCourse(courseId, event) {
   event.dataTransfer.dropEffect = 'move'
   const sourceId = draggingCourseId.value
   if (!sourceId || sourceId === courseId || lastDragTargetId.value === courseId) return
+  if (getCourseSemesterKey(sourceId) !== getCourseSemesterKey(courseId)) return
   lastDragTargetId.value = courseId
   dragOverCourseId.value = courseId
   reorderCoursesInList(sourceId, courseId)
@@ -689,10 +715,6 @@ function saveCourseOrder(courseIds) {
     toast.error('课程排序保存失败')
     loadCourse()
   })
-}
-
-function toggleCourseList() {
-  courseListVisible.value = !courseListVisible.value
 }
 
 function toBottom(courseId) {
@@ -1058,7 +1080,7 @@ function restoreCourse(courseId) {
     <div class="Top">
       <div class="top-header">
         <h2>置顶课程</h2>
-        <div class="top-actions">
+        <div class="top-actions" ref="choiceMenuRef">
           <button class="join" style="display: none" id="join_Class" @click="joinClass" ref="join_Class">＋加入课程
           </button>
           <button class="join join-wide" @click="Choice" id="joinOrCreate" ref="joinOrCreate">＋加入/创建课程
@@ -1070,8 +1092,28 @@ function restoreCourse(courseId) {
         </div>
       </div>
       <br>
-      <div class="top_container">
-        <div class="course-card" v-for="course in pinnedCourses" :key="'pin-' + course.id">
+      <TransitionGroup
+          v-if="pinnedCourses.length"
+          name="course-sort"
+          tag="div"
+          class="top_container"
+          :class="{ 'is-sorting': isCourseSorting }"
+      >
+        <div
+            class="course-card"
+            v-for="course in pinnedCourses"
+            :key="'pin-' + course.id"
+            :class="{
+              'is-dragging': draggingCourseId === course.id,
+              'drag-over': dragOverCourseId === course.id && draggingCourseId !== course.id
+            }"
+            :draggable="canDragPinnedSort"
+            @dragstart="onDragStart(course.id, $event)"
+            @dragover="onDragOverCourse(course.id, $event)"
+            @dragleave="onDragLeaveCourse"
+            @drop="onDropCourse(course.id, $event)"
+            @dragend="onDragEnd"
+        >
           <div
               class="course-card-cover"
               :class="'theme-' + getCourseThemeIndex(course)"
@@ -1089,6 +1131,7 @@ function restoreCourse(courseId) {
           </div>
           <div class="course-card-footer">
             <div class="course-card-footer-info">
+              <span v-if="canDragPinnedSort" class="drag-handle" title="拖动排序">⋮⋮</span>
               <span class="role-tag" :class="{ 'teach-tag': isTeachingCourse(course) }">
                 {{ isTeachingCourse(course) ? '教' : '学' }}
               </span>
@@ -1103,7 +1146,7 @@ function restoreCourse(courseId) {
             </div>
           </div>
         </div>
-      </div>
+      </TransitionGroup>
     </div>
     <div class="mid">
       <div class="mine">
@@ -1129,87 +1172,83 @@ function restoreCourse(courseId) {
         <button v-if="status === '老师'" class="manage" @click="router.push({ name: 'prepArea' })">备课区</button>
         <button v-if="status === '老师'" class="manage" @click="openArchiveModal">归档管理</button>
         <div class="search-wrapper">
-          <input class='search' type="text" placeholder="搜索我学的课程" v-model="searchKeyword" @input="handleSearch">
+          <input class='search' type="text" placeholder="搜索我学的课程" v-model="searchKeyword">
           <i class="iconfont icon-sousuo_sousuo search-icon"></i>
         </div>
       </div>
     </div>
-    <div class="bottom">
-      <div class="bottom-header" id="course_container">
-        <div class="bt_left">
-          <label class="semester-filter">
-            <span class="semester-filter-label">学期</span>
-            <select v-model="selectedSemester" class="semester-select">
-              <option v-for="item in semesterFilterOptions" :key="item.value" :value="item.value">
-                {{ item.label }}
-              </option>
-            </select>
-          </label>
-        </div>
-        <div class="bt_right">
-          <span v-if="canDragSort" class="drag-tip">拖动卡片可调整顺序</span>
-          <span class="toggle-list" @click="toggleCourseList">
-            {{ courseListVisible ? '收起' : '展开' }}
-          </span>
-        </div>
-      </div>
-      <TransitionGroup
-          v-show="courseListVisible"
-          name="course-sort"
-          tag="div"
-          class="container"
-          :class="{ 'is-sorting': isCourseSorting }"
-          ref="container"
-          id="top_container"
+    <div class="course-sections">
+      <p v-if="semesterGroups.length === 0" class="empty-semester-hint">当前没有可展示的课程</p>
+      <section
+          v-for="group in semesterGroups"
+          :key="group.key"
+          class="semester-section"
       >
-        <div
-            class="course-card"
-            v-for="course in filteredCourses"
-            :key="course.id"
-            :class="{
-              'is-dragging': draggingCourseId === course.id,
-              'drag-over': dragOverCourseId === course.id && draggingCourseId !== course.id
-            }"
-            :draggable="canDragSort"
-            @dragstart="onDragStart(course.id, $event)"
-            @dragover="onDragOverCourse(course.id, $event)"
-            @dragleave="onDragLeaveCourse"
-            @drop="onDropCourse(course.id, $event)"
-            @dragend="onDragEnd"
+        <div class="semester-section-header" @click="toggleSemesterSection(group.key)">
+          <div class="semester-section-title">
+            <h3>{{ group.label }}</h3>
+            <span class="semester-count">{{ group.courses.length }} 门课程</span>
+          </div>
+          <div class="semester-section-actions">
+            <span class="toggle-list">{{ isSemesterExpanded(group.key) ? '收起' : '展开' }}</span>
+          </div>
+        </div>
+        <TransitionGroup
+            v-show="isSemesterExpanded(group.key)"
+            name="course-sort"
+            tag="div"
+            class="container"
+            :class="{ 'is-sorting': isCourseSorting }"
         >
           <div
-              class="course-card-cover"
-              :class="'theme-' + getCourseThemeIndex(course)"
-              @click="handleClick(course.id)"
+              class="course-card"
+              v-for="course in group.courses"
+              :key="course.id"
+              :class="{
+                'is-dragging': draggingCourseId === course.id,
+                'drag-over': dragOverCourseId === course.id && draggingCourseId !== course.id
+              }"
+              :draggable="canDragSort"
+              @dragstart="onDragStart(course.id, $event)"
+              @dragover="onDragOverCourse(course.id, $event)"
+              @dragleave="onDragLeaveCourse"
+              @drop="onDropCourse(course.id, $event)"
+              @dragend="onDragEnd"
           >
-            <div class="course-card-decor decor-a"></div>
-            <div class="course-card-decor decor-b"></div>
-            <span class="course-card-term">{{ formatSemester(course.semester) }}</span>
-            <h3 class="course-card-title">{{ course.class_name }}</h3>
-            <p class="course-card-subtitle">{{ course.selected_classes || '暂无班级展示名' }}</p>
-            <div class="course-card-code">
-              <i class="iconfont icon-erweima"></i>
-              <span>加课码 {{ course.code }}</span>
+            <div
+                class="course-card-cover"
+                :class="'theme-' + getCourseThemeIndex(course)"
+                @click="handleClick(course.id)"
+            >
+              <div class="course-card-decor decor-a"></div>
+              <div class="course-card-decor decor-b"></div>
+              <span class="course-card-term">{{ formatSemester(course.semester) }}</span>
+              <h3 class="course-card-title">{{ course.class_name }}</h3>
+              <p class="course-card-subtitle">{{ course.selected_classes || '暂无班级展示名' }}</p>
+              <div class="course-card-code">
+                <i class="iconfont icon-erweima"></i>
+                <span>加课码 {{ course.code }}</span>
+              </div>
+            </div>
+            <div class="course-card-footer">
+              <div class="course-card-footer-info">
+                <span v-if="canDragSort" class="drag-handle" title="拖动排序">⋮⋮</span>
+                <span class="role-tag" :class="{ 'teach-tag': isTeachingCourse(course) }">
+                  {{ isTeachingCourse(course) ? '教' : '学' }}
+                </span>
+                <span class="teacher-label">负责人: {{ course.teacherName }}</span>
+              </div>
+              <div class="course-card-footer-actions">
+                <span class="action-link" @click.stop="toTop(course.id)">
+                  {{ course.is_pinned ? '取消置顶' : '置顶' }}
+                </span>
+                <span v-if="isTeachingCourse(course)" class="action-link" @click.stop="archiveCourse(course.id)">归档</span>
+                <span class="action-link muted" @click.stop="deleteCourse(course.id)">退课</span>
+              </div>
             </div>
           </div>
-          <div class="course-card-footer">
-            <div class="course-card-footer-info">
-              <span class="drag-handle" title="拖动排序">⋮⋮</span>
-              <span class="role-tag" :class="{ 'teach-tag': isTeachingCourse(course) }">
-                {{ isTeachingCourse(course) ? '教' : '学' }}
-              </span>
-              <span class="teacher-label">负责人: {{ course.teacherName }}</span>
-            </div>
-            <div class="course-card-footer-actions">
-            <span class="action-link" @click.stop="toTop(course.id)">
-              {{ course.is_pinned ? '取消置顶' : '置顶' }}
-            </span>
-            <span v-if="isTeachingCourse(course)" class="action-link" @click.stop="archiveCourse(course.id)">归档</span>
-            <span class="action-link muted" @click.stop="deleteCourse(course.id)">退课</span>
-          </div>
-          </div>
-        </div>
-      </TransitionGroup>
+        </TransitionGroup>
+      </section>
     </div>
   </div>
 </template>
@@ -1234,13 +1273,16 @@ function restoreCourse(courseId) {
 
 .top-actions {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 .choice-menu {
   position: absolute;
   right: 0;
   top: calc(100% + 8px);
-  min-width: 140px;
+  min-width: 152px;
   background: #fff;
   border-radius: 12px;
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
@@ -1253,10 +1295,16 @@ function restoreCourse(courseId) {
 }
 
 .choice-menu li {
-  padding: 10px 16px;
+  display: block;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 10px 18px;
   font-size: 15px;
+  line-height: 1.4;
   color: #374151;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .choice-menu li:hover {
@@ -1857,65 +1905,70 @@ input:focus {
   cursor: pointer;
 }
 
-.bottom {
-  background-color: rgb(248, 249, 250);
+.course-sections {
   width: 100%;
-  border: 1px solid rgb(218, 220, 224);
-  padding: 12px;
-  margin-bottom: 24px;
-  margin-top: 12px;
-  border-radius: 7px;
+  max-width: 1500px;
+  margin: 12px auto 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.bottom-header {
+.semester-section {
+  border: 1px solid rgb(218, 220, 224);
+  border-radius: 10px;
+  background: rgb(248, 249, 250);
+  padding: 18px;
+}
+
+.semester-section-header {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: center;
-  height: 40px;
-}
-
-.bt_left {
-  font-size: 22px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-}
-
-.semester-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.semester-filter-label {
-  font-size: 18px;
-  color: #575a5b;
-}
-
-.semester-select {
-  height: 38px;
-  min-width: 210px;
-  padding: 0 12px;
-  border: 1px solid rgb(218, 220, 224);
-  border-radius: 8px;
-  font-size: 16px;
-  color: #333;
-  background: #fff;
+  gap: 16px;
   cursor: pointer;
+  user-select: none;
 }
 
-.semester-select:focus {
-  outline: none;
-  border-color: rgb(72, 138, 248);
-  box-shadow: 0 0 0 3px rgba(72, 138, 248, 0.12);
+.semester-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
 }
 
-.bt_right {
-  font-size: 20px;
-  color: rgb(72, 138, 248);
+.semester-section-title h3 {
+  margin: 0;
+  font-size: 22px;
+  color: #1f2937;
+}
+
+.semester-count {
+  font-size: 14px;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+.semester-section-actions {
   display: flex;
   align-items: center;
   gap: 16px;
+  flex-shrink: 0;
+}
+
+.empty-semester-hint {
+  margin: 0;
+  padding: 28px 16px;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 16px;
+  border: 1px dashed rgb(218, 220, 224);
+  border-radius: 10px;
+  background: rgb(248, 249, 250);
+}
+
+.semester-section .container {
+  margin-top: 14px;
 }
 
 .drag-tip {
@@ -1925,29 +1978,13 @@ input:focus {
 
 .toggle-list {
   cursor: pointer;
+  color: rgb(72, 138, 248);
+  font-size: 16px;
+  white-space: nowrap;
 }
 
-li {
-  list-style-type: none;
-  padding: 0 20px 0 12px;
-  margin: 0 -12px;
-  width: 100px;
-  height: 30px;
-  cursor: pointer;
-  line-height: 30px;
-  color: rgb(108, 110, 113);
-}
-
-li:hover {
-  background-color: rgb(232, 240, 255);
-}
-
-ul {
-  position: absolute;
-  right: 0;
-  top: 52px;
-  box-shadow: 3px 3px 5px rgba(0, 0, 0, 0.3);
-  z-index: 5;
+.toggle-list:hover {
+  text-decoration: underline;
 }
 
 #cancel {
@@ -1992,7 +2029,8 @@ ul {
   padding: 10px 4px 16px;
 }
 
-.container.is-sorting .course-card:not(.is-dragging):hover {
+.container.is-sorting .course-card:not(.is-dragging):hover,
+.top_container.is-sorting .course-card:not(.is-dragging):hover {
   transform: none;
 }
 
@@ -2059,7 +2097,8 @@ ul {
   border-color: rgb(72, 138, 248);
 }
 
-.container.is-sorting {
+.container.is-sorting,
+.top_container.is-sorting {
   position: relative;
 }
 

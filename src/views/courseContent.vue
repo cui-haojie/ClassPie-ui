@@ -2,7 +2,7 @@
 import {useRoute,useRouter} from "vue-router";
 import {useAccountStore} from "@/stores/account.js";
 import {storeToRefs} from "pinia";
-import {ref, computed, watch, onMounted, onBeforeUnmount} from "vue";
+import {ref, computed, watch, onMounted, onBeforeUnmount, onActivated} from "vue";
 import request from "@/utils/request.js";
 import {toast} from '@/utils/toast.js';
 import {SEMESTER_OPTIONS, formatSemester} from '@/constants/semesters.js';
@@ -18,7 +18,7 @@ import DateTimePicker from '@/components/DateTimePicker.vue';
 import IconChevron from '@/components/IconChevron.vue';
 import RichHtml from '@/components/RichHtml.vue';
 import { stripHtml } from '@/utils/htmlText.js';
-import {formatDateTime, formatDeadline, homeworkStatusLabel, isHomeworkOverdue, normalizeDeadlineInput, testStatusLabel} from '@/utils/homeworkDeadline.js';
+import {formatDateTime, formatDeadline, homeworkStatusLabel, isHomeworkOverdue, normalizeDeadlineInput, studentHomeworkSubmitStatus, testStatusLabel} from '@/utils/homeworkDeadline.js';
 import { parseClassTimeSlots } from '@/utils/courseSchedule.js';
 
 /**
@@ -113,6 +113,16 @@ if (typeof initialSection === 'string' && sectionTabs.some(t => t.key === initia
 
 const activeTabMeta = computed(() => sectionTabs.find(t => t.key === activeSection.value) || sectionTabs[0])
 
+const visibleSectionTabs = computed(() =>
+  status.value === '老师'
+    ? sectionTabs
+    : sectionTabs.filter(tab => tab.key !== 'grades'),
+)
+
+function studentHomeworkStatus(homework) {
+  return studentHomeworkSubmitStatus(homework)
+}
+
 const sectionCountLabel = computed(() => {
   if (activeSection.value === 'members') return ''
   if (activeSection.value === 'grades') return gradeBook.value ? `共 ${gradeBook.value.student_count} 名学生` : ''
@@ -149,6 +159,10 @@ request.post("/editor/account",{account: account.value})
       mechanism.value = resMechanism;
       email_or_phone.value = resEmailOrPhone;
       status_number.value = resStatusNumber;
+      if (resStatus === '学生' && activeSection.value === 'grades') {
+        activeSection.value = 'homework';
+      }
+      loadHomework();
     })
 request.post("/editor/getCourseById", {id: course_id.value})
     .then((res) => {
@@ -370,17 +384,17 @@ request.post("/editor/getCountByClassId", {class_id:class_id})
 const home_work = ref([]);
 
 function loadHomework() {
-request.post("/editor/getHomeworkByClassId", {class_id:class_id})
-  .then((res) => {
-    home_work.value = res;
-    console.log(res);
+  request.post('/editor/getHomeworkByClassId', {
+    class_id: class_id,
+    account: account.value,
   })
-    .catch(error => {
-      toast.error('加载失败')
-    })
+      .then((res) => {
+        home_work.value = res || [];
+      })
+      .catch(() => {
+        toast.error('加载失败');
+      });
 }
-
-loadHomework();
 
 function handleHomework(homeworkId) {
   router.push({
@@ -404,6 +418,9 @@ function loadAllActivities() {
 }
 
 function switchSection(key) {
+  if (key === 'grades' && status.value !== '老师') {
+    return
+  }
   activeSection.value = key
   const tab = sectionTabs.find(t => t.key === key)
   if (tab?.type) loadActivities(tab.type)
@@ -465,6 +482,12 @@ function loadOpenAttendance() {
 onMounted(() => {
   loadOpenAttendance()
   attendancePollTimer = setInterval(loadOpenAttendance, 15000)
+})
+
+onActivated(() => {
+  if (account.value) {
+    loadHomework()
+  }
 })
 
 onBeforeUnmount(() => {
@@ -921,7 +944,7 @@ loadAllActivities()
       </div>
       <nav class="course-tabs" aria-label="课程内容">
         <button
-            v-for="tab in sectionTabs"
+            v-for="tab in visibleSectionTabs"
             :key="tab.key"
             type="button"
             class="course-tab"
@@ -1046,6 +1069,14 @@ loadAllActivities()
                 <span class="stat-item stat-graded">已批 {{ homework.graded_count ?? 0 }}</span>
                 <span class="stat-item stat-ungraded">未批 {{ homework.ungraded_count ?? 0 }}</span>
                 <span class="stat-item stat-unsubmitted">未提交 {{ homework.unsubmitted_count ?? 0 }}</span>
+              </div>
+              <div v-else class="homework-stats">
+                <span
+                    class="stat-item"
+                    :class="`stat-my-${studentHomeworkStatus(homework).tone}`"
+                >
+                  {{ studentHomeworkStatus(homework).label }}
+                </span>
               </div>
             </div>
           </div>
@@ -1553,6 +1584,30 @@ loadAllActivities()
 .stat-unsubmitted {
   background: #fef2f2;
   color: #dc2626;
+}
+
+.stat-my-graded {
+  background: #ecfdf5;
+  color: #047857;
+  font-weight: 600;
+}
+
+.stat-my-submitted {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.stat-my-pending {
+  background: #fff7ed;
+  color: #c2410c;
+  font-weight: 600;
+}
+
+.stat-my-overdue {
+  background: #fef2f2;
+  color: #b91c1c;
+  font-weight: 600;
 }
 
 .members-panel {

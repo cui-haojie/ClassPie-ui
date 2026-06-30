@@ -6,7 +6,7 @@ import {useAccountStore} from "@/stores/account.js";
 import {storeToRefs} from "pinia";
 import {toast} from '@/utils/toast.js';
 import {resolveAttachmentUrl} from '@/utils/avatar.js';
-import {formatDeadline, homeworkStatusLabel, isHomeworkOverdue} from '@/utils/homeworkDeadline.js';
+import {formatDeadline, homeworkStatusLabel, isHomeworkOverdue, studentHomeworkSubmitStatus, studentSubmissionStatus} from '@/utils/homeworkDeadline.js';
 import UserAvatar from '@/components/UserAvatar.vue';
 import RichHtml from '@/components/RichHtml.vue';
 
@@ -40,14 +40,18 @@ const attachmentFile = ref(null);
 const attachmentInputRef = ref(null);
 const memberProfiles = ref({});
 
-const homeworkContentId = computed(() => {
-  const cid = homework.value?.content_id;
-  return cid && cid > 0 ? Number(cid) : homework_id.value;
-});
+const homeworkContentId = computed(() => homework_id.value);
 
 const isOverdue = computed(() => isHomeworkOverdue(homework.value?.deadline));
 const deadlineText = computed(() => formatDeadline(homework.value?.deadline));
 const statusLabel = computed(() => homeworkStatusLabel(homework.value?.deadline));
+const mySubmitStatus = computed(() => {
+  if (status.value === '老师') return null;
+  if (mySubmission.value) {
+    return studentSubmissionStatus(homework.value, mySubmission.value);
+  }
+  return studentHomeworkSubmitStatus(homework.value);
+});
 
 function checkStatus() {
   request.post("/editor/getAccountStatus", {account: account.value})
@@ -58,7 +62,10 @@ function checkStatus() {
 }
 
 function loadHomework() {
-  return request.post("/editor/getHomeworkById", {homework_id: homework_id.value})
+  return request.post("/editor/getHomeworkById", {
+    homework_id: homework_id.value,
+    account: account.value,
+  })
       .then(res => {
         if (res) {
           homework.value = res;
@@ -70,7 +77,9 @@ function loadContent() {
   return request.post("/editor/getContentById", {contentId: homeworkContentId.value})
       .then((res) => {
         contents.value = Array.isArray(res) ? res : [];
-        mySubmission.value = contents.value.find(item => item.account === account.value) || null;
+        mySubmission.value = contents.value.find(item => item.account === account.value)
+            || contents.value.find(item => item.account?.trim() === account.value?.trim())
+            || null;
         if (mySubmission.value) {
           submissionText.value = mySubmission.value.details || '';
         }
@@ -269,6 +278,8 @@ function suggestAiGrade() {
     homework_name: homework.value.name,
     homework_description: homework.value.details || '',
     student_answer: selectedSubmission.value.details || '',
+    student_attachment_url: selectedSubmission.value.attachment_url || '',
+    student_attachment_name: selectedSubmission.value.attachment_name || '',
     max_score: 100,
   }, { timeout: 90000 }).then(res => {
     if (res?.available) {
@@ -306,6 +317,13 @@ function remindSubmit() {
 
 <template>
   <div id="body">
+    <div
+        v-if="status === '学生' && mySubmitStatus"
+        class="submit-status-banner"
+        :class="`tone-${mySubmitStatus.tone}`"
+    >
+      {{ mySubmitStatus.label }}
+    </div>
     <div v-if="status === '老师'" class="title_container">
       <div class="title" :class="{ active: activeView === 'details' }" @click="showDetails_2">详情</div>
       <div class="title" :class="{ active: activeView === 'grade' }" @click="comment">批阅</div>
@@ -513,6 +531,38 @@ function remindSubmit() {
   font-size: 16px;
   background: #fef2f2;
   border-radius: 8px;
+}
+
+.submit-status-banner {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.submit-status-banner.tone-graded {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.submit-status-banner.tone-submitted {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.submit-status-banner.tone-pending {
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid #fed7aa;
+}
+
+.submit-status-banner.tone-overdue {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
 }
 
 .details {

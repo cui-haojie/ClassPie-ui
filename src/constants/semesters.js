@@ -20,6 +20,19 @@ export function getDefaultSemester() {
   return `${year - 1}-${year} 第一学期`
 }
 
+export function getSemesterRank(value) {
+  if (!value) return -1
+  const matched = String(value).match(/(\d{4})-\d{4}\s*(第一|第二)学期/)
+  if (!matched) return 0
+  const year = Number(matched[1])
+  const term = matched[2] === '第二' ? 2 : 1
+  return year * 10 + term
+}
+
+export function sortSemestersDesc(values) {
+  return [...values].sort((a, b) => getSemesterRank(b) - getSemesterRank(a))
+}
+
 export function formatSemester(value) {
   if (!value) return '未设置学期'
   const matched = SEMESTER_OPTIONS.find(item => item.value === value)

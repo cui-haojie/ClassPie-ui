@@ -99,6 +99,43 @@ export function homeworkStatusLabel(value) {
   return isHomeworkOverdue(value) ? '已截止' : '进行中'
 }
 
+/** 学生端作业提交状态（列表/详情展示） */
+export function isHomeworkSubmitted(homework) {
+  if (!homework) return false
+  return homework.my_submitted === true
+      || homework.mySubmitted === true
+      || homework.my_submitted === 1
+}
+
+export function studentHomeworkSubmitStatus(homework) {
+  if (!homework) {
+    return { label: '未提交', tone: 'pending' }
+  }
+  if (homework.my_graded === true || homework.myGraded === true) {
+    const score = homework.my_score ?? homework.myScore ?? 0
+    return { label: `已批阅 · ${score} 分`, tone: 'graded' }
+  }
+  if (isHomeworkSubmitted(homework)) {
+    return { label: '已提交 · 待批阅', tone: 'submitted' }
+  }
+  if (isHomeworkOverdue(homework.deadline)) {
+    return { label: '未提交 · 已截止', tone: 'overdue' }
+  }
+  return { label: '未提交', tone: 'pending' }
+}
+
+/** 根据我的提交记录计算状态（作业详情页） */
+export function studentSubmissionStatus(homework, submission) {
+  if (submission) {
+    if (submission.is_graded || submission.isGraded) {
+      return { label: `已批阅 · ${submission.score ?? 0} 分`, tone: 'graded' }
+    }
+    return { label: '已提交 · 待批阅', tone: 'submitted' }
+  }
+  const base = { deadline: homework?.deadline }
+  return studentHomeworkSubmitStatus(base)
+}
+
 export function isBeforeStart(value) {
   const start = parseDeadline(value)
   if (!start) return false
