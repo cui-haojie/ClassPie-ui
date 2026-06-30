@@ -55,7 +55,10 @@ const semesterOptions = SEMESTER_OPTIONS
 const draggingCourseId = ref(null)
 const dragOverCourseId = ref(null)
 const lastDragTargetId = ref(null)
+const dragScope = ref(null)
 const orderDirty = ref(false)
+const semesterOrderIds = ref([])
+const pinnedOrderIds = ref([])
 const showJoinModal = ref(false)
 const showCreateModal = ref(false)
 const showChoiceMenu = ref(false)
@@ -74,9 +77,77 @@ const createForm = reactive({
   semester: getDefaultSemester(),
 })
 
-const pinnedCourses = computed(() =>
-    courses.value.filter(course => course.is_pinned)
-);
+const pinnedCourses = computed(() => {
+  const pinned = filteredCourses.value.filter(isPinnedCourse)
+  return orderCoursesByIds(pinned, pinnedOrderIds.value)
+})
+
+function isPinnedCourse(course) {
+  const pinned = course?.is_pinned
+  return pinned === true || pinned === 1 || pinned === '1'
+}
+
+function pinnedOrderStorageKey() {
+  return `classpai:pinned-order:${account.value || ''}`
+}
+
+function loadPinnedOrderFromStorage(pinnedIds) {
+  if (!account.value) return [...pinnedIds]
+  try {
+    const raw = localStorage.getItem(pinnedOrderStorageKey())
+    if (!raw) return [...pinnedIds]
+    const saved = JSON.parse(raw)
+    if (!Array.isArray(saved)) return [...pinnedIds]
+    const valid = saved.filter(id => pinnedIds.includes(id))
+    const missing = pinnedIds.filter(id => !valid.includes(id))
+    return [...valid, ...missing]
+  } catch {
+    return [...pinnedIds]
+  }
+}
+
+function savePinnedOrderToStorage() {
+  if (!account.value) return
+  localStorage.setItem(pinnedOrderStorageKey(), JSON.stringify(pinnedOrderIds.value))
+}
+
+function orderCoursesByIds(list, orderIds) {
+  const map = new Map(list.map(course => [course.id, course]))
+  const ordered = []
+  const seen = new Set()
+  for (const id of orderIds) {
+    const course = map.get(id)
+    if (course && !seen.has(id)) {
+      ordered.push(course)
+      seen.add(id)
+    }
+  }
+  for (const course of list) {
+    if (!seen.has(course.id)) ordered.push(course)
+  }
+  return ordered
+}
+
+function syncOrdersAfterLoad(list) {
+  semesterOrderIds.value = list.map(course => course.id)
+  const pinnedIds = list.filter(isPinnedCourse).map(course => course.id)
+  pinnedOrderIds.value = loadPinnedOrderFromStorage(pinnedIds)
+}
+
+function syncPinnedOrderAfterToggle(courseId, pinned) {
+  if (pinned) {
+    if (!pinnedOrderIds.value.includes(courseId)) {
+      pinnedOrderIds.value = [...pinnedOrderIds.value, courseId]
+    }
+  } else {
+    pinnedOrderIds.value = pinnedOrderIds.value.filter(id => id !== courseId)
+  }
+  savePinnedOrderToStorage()
+}
+
+const displayCoursesForSemester = computed(() =>
+    orderCoursesByIds(filteredCourses.value, semesterOrderIds.value)
+)
 
 function getCourseThemeIndex(course) {
   const id = Number(course?.id) || 0;
@@ -115,7 +186,7 @@ const filteredCourses = computed(() => {
 
 const semesterGroups = computed(() => {
   const map = new Map()
-  filteredCourses.value.forEach(course => {
+  displayCoursesForSemester.value.forEach(course => {
     const key = course.semester || '__unset__'
     if (!map.has(key)) map.set(key, [])
     map.get(key).push(course)
@@ -271,6 +342,7 @@ function loadCourse() {
         );
         // 等待所有教师请求完成
         courses.value = await Promise.all(teacherRequests);
+        syncOrdersAfterLoad(courses.value)
       })
       .catch(error => {
         console.error("课程加载失败:", error);
@@ -630,6 +702,7 @@ function toTop(courseId) {
   const index = courses.value.findIndex(course => course.id === courseId);
   if (index === -1) return;
   courses.value[index].is_pinned = !courses.value[index].is_pinned;
+  syncPinnedOrderAfterToggle(courseId, courses.value[index].is_pinned)
   request.post("/editor/updatePinStatus", {
     id: courseId,
     is_pinned: courses.value[index].is_pinned,
@@ -637,11 +710,13 @@ function toTop(courseId) {
   }).catch(error => {
     console.error("更新置顶状态失败:", error)
     courses.value[index].is_pinned = !courses.value[index].is_pinned;
+    syncPinnedOrderAfterToggle(courseId, courses.value[index].is_pinned)
   });
 }
 
-function onDragStart(courseId, event) {
+function onDragStart(courseId, event, scope) {
   draggingCourseId.value = courseId
+  dragScope.value = scope
   lastDragTargetId.value = null
   orderDirty.value = false
   event.dataTransfer.effectAllowed = 'move'
@@ -651,12 +726,22 @@ function onDragStart(courseId, event) {
   }
 }
 
+function canDropOnTarget(sourceId, targetId) {
+  if (dragScope.value === 'pinned') {
+    return pinnedOrderIds.value.includes(sourceId) && pinnedOrderIds.value.includes(targetId)
+  }
+  if (dragScope.value === 'semester') {
+    return getCourseSemesterKey(sourceId) === getCourseSemesterKey(targetId)
+  }
+  return false
+}
+
 function onDragOverCourse(courseId, event) {
   event.preventDefault()
   event.dataTransfer.dropEffect = 'move'
   const sourceId = draggingCourseId.value
   if (!sourceId || sourceId === courseId || lastDragTargetId.value === courseId) return
-  if (getCourseSemesterKey(sourceId) !== getCourseSemesterKey(courseId)) return
+  if (!canDropOnTarget(sourceId, courseId)) return
   lastDragTargetId.value = courseId
   dragOverCourseId.value = courseId
   reorderCoursesInList(sourceId, courseId)
@@ -671,7 +756,7 @@ function onDragLeaveCourse(event) {
 function onDropCourse(targetCourseId, event) {
   event.preventDefault()
   const sourceId = draggingCourseId.value || Number(event.dataTransfer.getData('text/plain'))
-  if (sourceId && sourceId !== targetCourseId) {
+  if (sourceId && sourceId !== targetCourseId && canDropOnTarget(sourceId, targetCourseId)) {
     reorderCoursesInList(sourceId, targetCourseId)
   }
   dragOverCourseId.value = null
@@ -680,29 +765,75 @@ function onDropCourse(targetCourseId, event) {
 
 function onDragEnd() {
   if (orderDirty.value) {
-    saveCourseOrder(courses.value.map(course => course.id))
+    if (dragScope.value === 'pinned') {
+      savePinnedOrderToStorage()
+    } else if (dragScope.value === 'semester') {
+      saveCourseOrder([...semesterOrderIds.value])
+      courses.value = orderCoursesByIds(courses.value, semesterOrderIds.value)
+    }
     orderDirty.value = false
   }
   draggingCourseId.value = null
+  dragScope.value = null
   dragOverCourseId.value = null
   lastDragTargetId.value = null
 }
 
-function reorderCoursesInList(sourceId, targetId) {
-  const fromIndex = courses.value.findIndex(course => course.id === sourceId)
-  const toIndex = courses.value.findIndex(course => course.id === targetId)
+function reorderPinnedOrder(sourceId, targetId) {
+  const list = [...pinnedOrderIds.value]
+  const fromIndex = list.indexOf(sourceId)
+  const toIndex = list.indexOf(targetId)
   if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return
 
-  const list = [...courses.value]
   const [moved] = list.splice(fromIndex, 1)
   list.splice(toIndex, 0, moved)
-  courses.value = list
+  pinnedOrderIds.value = list
   orderDirty.value = true
+}
+
+function reorderSemesterOrder(sourceId, targetId) {
+  const semesterKey = getCourseSemesterKey(sourceId)
+  const list = [...semesterOrderIds.value]
+  const slotIndices = list
+      .map((id, index) => (getCourseSemesterKey(id) === semesterKey ? index : -1))
+      .filter(index => index >= 0)
+  if (!slotIndices.length) return
+
+  const subset = slotIndices.map(index => list[index])
+  const fromIndex = subset.indexOf(sourceId)
+  const toIndex = subset.indexOf(targetId)
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return
+
+  const reordered = [...subset]
+  const [moved] = reordered.splice(fromIndex, 1)
+  reordered.splice(toIndex, 0, moved)
+
+  const next = [...list]
+  slotIndices.forEach((index, i) => {
+    next[index] = reordered[i]
+  })
+  semesterOrderIds.value = next
+  orderDirty.value = true
+}
+
+function reorderCoursesInList(sourceId, targetId) {
+  if (dragScope.value === 'pinned') {
+    reorderPinnedOrder(sourceId, targetId)
+    return
+  }
+  if (dragScope.value === 'semester') {
+    reorderSemesterOrder(sourceId, targetId)
+  }
 }
 
 function reorderCourses(sourceId, targetId) {
   reorderCoursesInList(sourceId, targetId)
-  saveCourseOrder(courses.value.map(course => course.id))
+  if (dragScope.value === 'pinned') {
+    savePinnedOrderToStorage()
+  } else if (dragScope.value === 'semester') {
+    saveCourseOrder([...semesterOrderIds.value])
+    courses.value = orderCoursesByIds(courses.value, semesterOrderIds.value)
+  }
   orderDirty.value = false
 }
 
@@ -721,6 +852,7 @@ function toBottom(courseId) {
   const index = courses.value.findIndex(course => course.id === courseId);
   if (index === -1) return;
   courses.value[index].is_pinned = false;
+  syncPinnedOrderAfterToggle(courseId, false)
   request.post("/editor/updatePinStatus", {
     id: courseId,
     is_pinned: false,
@@ -728,6 +860,7 @@ function toBottom(courseId) {
   }).catch(error => {
     console.error("取消置顶失败:", error);
     courses.value[index].is_pinned = true;
+    syncPinnedOrderAfterToggle(courseId, true)
   });
 }
 
@@ -1094,11 +1227,11 @@ function restoreCourse(courseId) {
       <br>
       <TransitionGroup
           v-if="pinnedCourses.length"
-          name="course-sort"
+          name="pinned-sort"
           tag="div"
           class="top_container"
           :class="{ 'is-sorting': isCourseSorting }"
-      >
+        >
         <div
             class="course-card"
             v-for="course in pinnedCourses"
@@ -1108,7 +1241,7 @@ function restoreCourse(courseId) {
               'drag-over': dragOverCourseId === course.id && draggingCourseId !== course.id
             }"
             :draggable="canDragPinnedSort"
-            @dragstart="onDragStart(course.id, $event)"
+            @dragstart="onDragStart(course.id, $event, 'pinned')"
             @dragover="onDragOverCourse(course.id, $event)"
             @dragleave="onDragLeaveCourse"
             @drop="onDropCourse(course.id, $event)"
@@ -1195,7 +1328,7 @@ function restoreCourse(courseId) {
         </div>
         <TransitionGroup
             v-show="isSemesterExpanded(group.key)"
-            name="course-sort"
+            name="semester-sort"
             tag="div"
             class="container"
             :class="{ 'is-sorting': isCourseSorting }"
@@ -1208,8 +1341,8 @@ function restoreCourse(courseId) {
                 'is-dragging': draggingCourseId === course.id,
                 'drag-over': dragOverCourseId === course.id && draggingCourseId !== course.id
               }"
-              :draggable="canDragSort"
-              @dragstart="onDragStart(course.id, $event)"
+              :draggable="canDragSort && group.courses.length > 1"
+              @dragstart="onDragStart(course.id, $event, 'semester')"
               @dragover="onDragOverCourse(course.id, $event)"
               @dragleave="onDragLeaveCourse"
               @drop="onDropCourse(course.id, $event)"
@@ -1232,7 +1365,7 @@ function restoreCourse(courseId) {
             </div>
             <div class="course-card-footer">
               <div class="course-card-footer-info">
-                <span v-if="canDragSort" class="drag-handle" title="拖动排序">⋮⋮</span>
+                <span v-if="canDragSort && group.courses.length > 1" class="drag-handle" title="拖动排序">⋮⋮</span>
                 <span class="role-tag" :class="{ 'teach-tag': isTeachingCourse(course) }">
                   {{ isTeachingCourse(course) ? '教' : '学' }}
                 </span>
@@ -2034,23 +2167,55 @@ input:focus {
   transform: none;
 }
 
+/* 拖拽时保留换位滑动动画，只屏蔽 enter/leave 虚影 */
+.top_container.is-sorting .pinned-sort-move,
+.container.is-sorting .semester-sort-move {
+  transition: transform 0.36s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.top_container.is-sorting .pinned-sort-enter-active,
+.top_container.is-sorting .pinned-sort-leave-active,
+.container.is-sorting .semester-sort-enter-active,
+.container.is-sorting .semester-sort-leave-active {
+  transition: none !important;
+}
+
+.top_container.is-sorting .pinned-sort-leave-active,
+.container.is-sorting .semester-sort-leave-active {
+  position: static !important;
+  width: 0 !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  opacity: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none;
+}
+
 /* 拖拽排序动画 */
-.course-sort-move {
+.pinned-sort-move,
+.semester-sort-move {
   transition: transform 0.38s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
-.course-sort-enter-active,
-.course-sort-leave-active {
+.pinned-sort-enter-active,
+.pinned-sort-leave-active,
+.semester-sort-enter-active,
+.semester-sort-leave-active {
   transition: opacity 0.28s ease, transform 0.28s ease;
 }
 
-.course-sort-enter-from,
-.course-sort-leave-to {
+.pinned-sort-enter-from,
+.pinned-sort-leave-to,
+.semester-sort-enter-from,
+.semester-sort-leave-to {
   opacity: 0;
   transform: scale(0.92);
 }
 
-.course-sort-leave-active {
+.pinned-sort-leave-active,
+.semester-sort-leave-active {
   position: absolute;
   pointer-events: none;
 }
@@ -2079,27 +2244,40 @@ input:focus {
 }
 
 .course-card.is-dragging {
-  opacity: 0.92;
-  transform: scale(1.04) rotate(0.6deg);
-  box-shadow: 0 20px 48px rgba(72, 138, 248, 0.28);
+  opacity: 0.55;
+  transform: scale(1.02);
+  box-shadow: 0 16px 36px rgba(72, 138, 248, 0.22);
   border-color: rgb(72, 138, 248);
   cursor: grabbing;
   z-index: 20;
+  transition: opacity 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease !important;
 }
 
 .course-card.is-dragging:hover {
-  transform: scale(1.04) rotate(0.6deg);
+  transform: scale(1.02);
+  box-shadow: 0 16px 36px rgba(72, 138, 248, 0.22);
 }
 
 .course-card.drag-over {
-  transform: translateY(-8px) scale(1.02);
+  transform: translateY(-6px) scale(1.02);
   box-shadow: 0 0 0 2px rgb(72, 138, 248), 0 14px 32px rgba(72, 138, 248, 0.18);
   border-color: rgb(72, 138, 248);
+  transition: transform 0.28s cubic-bezier(0.25, 0.8, 0.25, 1),
+              box-shadow 0.28s ease,
+              border-color 0.28s ease;
 }
 
 .container.is-sorting,
 .top_container.is-sorting {
   position: relative;
+  user-select: none;
+}
+
+.container.is-sorting .course-card:not(.is-dragging),
+.top_container.is-sorting .course-card:not(.is-dragging) {
+  transition: transform 0.32s cubic-bezier(0.25, 0.8, 0.25, 1),
+              box-shadow 0.24s ease,
+              border-color 0.24s ease;
 }
 
 .drag-handle {
